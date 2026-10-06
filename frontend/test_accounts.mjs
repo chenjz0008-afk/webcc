@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { expiration, sortAccounts, toLocalDate, toTimestamp } from './src/accounts.js';
+const now = Date.UTC(2026, 9, 1, 12, 0);
+const account = days => ({ name: `account-${days}`, status: 'ready', session_expires_at: now / 1000 + days * 86400 });
+assert.equal(expiration(account(2), now).color, 'error.main');
+assert.equal(expiration(account(5), now).color, 'warning.main');
+assert.equal(expiration(account(10), now).color, 'text.primary');
+assert.equal(expiration({ name: 'unknown', status: 'ready' }, now).label, '到期时间未知');
+assert.equal(expiration({ ...account(2), status: 'quarantined' }, now).label, '已隔离');
+assert.equal(expiration(account(-1), now).label, '已到期');
+const inactive = { name: 'blocked', status: 'disabled', session_expires_at: now / 1000 + 1 };
+assert.deepEqual(sortAccounts([inactive, account(10), { name: 'unknown', status: 'ready' }, account(2)]).map(a => a.name), ['account-2', 'account-10', 'unknown', 'blocked']);
+assert.equal(toTimestamp(toLocalDate(now / 1000)), now / 1000);
+assert.equal(toTimestamp(''), null);
+assert.match(expiration({ ...account(2), session_expiry_source: 'estimated' }, now).label, /^预计剩余/);
+console.log('Expiry display, ordering and local date conversion passed.');
