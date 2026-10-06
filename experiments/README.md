@@ -35,3 +35,5 @@ sudo python3 -m experiments.live_tools --gateway
 ## SDK 网关验收
 
 `--gateway` 在服务器启动临时主网关，使用显式 key、Base URL 和 X-WebCC-Tools 请求头，以官方 Python SDK 执行同一六轮文档流程。cc1 使用 SSE 聚合，ccb1 和 ccb9 使用普通响应；每个账号再验证错误 ID 在上游调用前被拒绝。SDK 安装在测试临时目录，完成后删除；不使用本机 Claude Code 环境。报告为服务器私有文件 `/var/lib/clewdr-manager/web-tool-gateway-test.json`。
+
+TypeScript SDK 测试入口为 typescript_cases.py 和 sdk_request.mjs；支持候选 TLS 和真实合成 Markdown 文件。必须在服务器隔离环境配置官方 SDK、显式候选 key/Base URL，以及受白名单保护的临时账号容器，不连接本机 Claude Code。依赖版本、HTTPS/文件范围和结果见 ../docs/TYPESCRIPT-SDK.md。

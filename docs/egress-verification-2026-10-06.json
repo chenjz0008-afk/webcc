@@ -111,5 +111,18 @@
     "webcc-egress": "active"
   },
   "boot_dependency": true,
-  "reboot_tested": false
+  "reboot_tested": false,
+  "production_public_https": {
+    "status": 200,
+    "certificate_verified": true,
+    "nonempty": true,
+    "text": "Hi."
+  },
+  "proxy_authentication": {
+    "checked": 11,
+    "forwarding_passed": 10,
+    "failed_account": "ccb1",
+    "failure": "SOCKS5 user rejected",
+    "claude_account_ban_confirmed": false
+  }
 }

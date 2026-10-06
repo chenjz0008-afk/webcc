@@ -58,3 +58,9 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 依据 Docker 官方 iptables 文档核查当前服务器为 iptables-nft 兼容后端。使用专用 bridge、DOCKER-USER 与 INPUT/FORWARD 防火墙链；先安装规则再启动容器，启动恢复失败不放行 Docker。官方 ClewdR 固定提交 061c6d8 的 config/clewdr_config.rs 使用 wreq Proxy::all；本地 SOCKS5 DNS 依赖在临时测试中导致 500，改为 SOCKS5h 后不开放直接 DNS 仍真实回复成功。
 
 来源：https://docs.docker.com/engine/network/firewall-iptables/ ，https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/config/clewdr_config.rs 。实现和边界见 EGRESS.md。
+
+## 2026-10-06：TypeScript SDK 与 HTTPS 文件流程
+
+依据官方 TypeScript SDK 及 helpers 接口使用 messages.create 和 messages.stream().finalMessage()，实际 npm 版本 0.131.0、Node v24.21.0。用独立模型别名与显式请求头测试近似通道，未伪装成官方 strict 或原生模型身份。Node 运行时经官方 SHA256 校验，npm 禁用安装脚本。候选 HTTPS 保持证书校验，使用临时 CA，并验证不信任 CA 时不会进入模型调用。真实合成 Markdown 文件按逻辑 ID 访问，校验目标编辑和其他字节不变；不把此流程称为 WordBuddy 或 DOCX 验收。
+
+来源：https://github.com/anthropics/anthropic-sdk-typescript ，https://platform.claude.com/docs/en/api/sdks/typescript 。结果见 TYPESCRIPT-SDK.md。
