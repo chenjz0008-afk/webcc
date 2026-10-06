@@ -1,0 +1,518 @@
+{
+  "accounts": [
+    {
+      "account": "cc1",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 5.82,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 6.42,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I don't have a `read_document` tool available here, so I can't retrieve a document with the id test-001. The only content I can see is the text of your uploaded file, which is just the instruction to use that tool, and I won't make up what the document might contain.\n\nIf you meant for me to work with a specific document, you could paste its text straight into the chat or upload the file itself, and I'll take it from there.",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 94
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 2.22,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "cc2",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 500,
+        "seconds": 1.3,
+        "error_type": "wreq_error",
+        "classification": "upstream_error"
+      },
+      "web_tool": {
+        "status": 500,
+        "seconds": 1.08,
+        "error_type": "wreq_error",
+        "classification": "upstream_error"
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.1,
+        "error_type": "wreq_error",
+        "classification": "upstream_error"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb1",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 7.18,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 8.54,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I don't have a `read_document` tool available, so I can't fetch a document with id test-001. My tools in this chat are for running code in a sandbox, creating files, publishing artifacts, searching connectors, and similar tasks, and none of them looks up documents by id.\n\nThe only thing I can see is the text of your uploaded paste.txt, which contains just that instruction: \"Use read_document with id test-001 to read the document. Do not invent its contents.\" There's no other document content her",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 169
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 3.31,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb2",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 11.01,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 11.39,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I can't read that document. The file you uploaded contains only this line:\n\n> Use read_document with id test-001 to read the document. Do not invent its contents.\n\nI don't have a `read_document` tool. I searched for one and found only two MCP resource tools, `list_mcp_resources` and `read_resource_link`. Both need the name of a connected MCP server, and I don't know of any that holds a document with id `test-001`. Guessing a server name or URI would be making things up, so I haven't tried. Since",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 178
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.07,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb3",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 6.27,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 5.61,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "The uploaded file contains only one line of text: \"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nIt reads as an instruction rather than an actual document. I don't have a `read_document` tool in this conversation, so I can't retrieve a document with the id test-001, and I won't guess at what it might contain.\n\nIf you meant to share a different file, you can upload it again or paste the text here. If you're testing a workflow that depends on a `read_docume",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 132
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.21,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb4",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 5.2,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 7.74,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I couldn't read that document. The file you uploaded contains only this line: \"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nI don't have a `read_document` tool. A search for one turned up only two generic MCP resource tools, `list_mcp_resources` and `read_resource_link`. Both need the name of a connected MCP server, and I don't know of one, so I can't tell where a document with id `test-001` would live. I won't guess at its contents.\n\nIf you tell me whic",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 158
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.22,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb5",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 4.92,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 5.45,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "The pasted file contains an instruction to use a `read_document` tool with id `test-001`, but I don't have a tool by that name. My available tools are for running code in a container, creating and presenting files, publishing artifacts, searching connectors, and fetching sports data. None of them reads a document by ID.\n\nSince I can't retrieve `test-001`, I won't guess at its contents. The only text I can see is the instruction itself, which is all that `paste.txt` holds.\n\nIf you meant for me to",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 166
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.11,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb6",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 6.95,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 6.63,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "The file you uploaded contains only one line: \"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nI don't have a `read_document` tool in this conversation, so I can't open a document with the id test-001, and I won't guess at what it contains. The only content I can see is that instruction itself.\n\nIf you meant to share a different document, you can upload it directly, or paste its text into the chat. What would you like me to do with it?",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 108
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.12,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb7",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 6.69,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 12.44,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I can't read that document. The uploaded file only contains this instruction: \"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nI don't have a `read_document` tool here. A search for it turned up only two generic MCP tools, one that lists resources and one that reads a resource by URI. Both need the name of a connected MCP server, and I don't know of one, so I'd be guessing. Nothing in this conversation links document `test-001` to a server.\n\nI won't make up",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 152
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.1,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb8",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 10.16,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 5.16,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "I don't have a `read_document` tool in this conversation, so I can't retrieve the document with ID test-001. The only content I can see is the uploaded paste.txt, which contains just this instruction:\n\n\"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nI won't guess at what test-001 contains. If you meant for me to work with a particular document, you could paste its text directly into the chat or upload it as a file. If you're testing whether I'd fabricate c",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 132
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.14,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    },
+    {
+      "account": "ccb9",
+      "readiness": {
+        "status": 200,
+        "seconds": 0.0,
+        "model": null,
+        "stop_reason": null,
+        "blocks": [],
+        "text": "",
+        "usage": null
+      },
+      "proxy_only_firewall": true,
+      "web_text": {
+        "status": 200,
+        "seconds": 7.16,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "Hello.",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 2
+        }
+      },
+      "web_tool": {
+        "status": 200,
+        "seconds": 4.66,
+        "model": "",
+        "stop_reason": null,
+        "blocks": [
+          "text"
+        ],
+        "text": "The uploaded file contains only an instruction: \"Use read_document with id test-001 to read the document. Do not invent its contents.\"\n\nI don't have a `read_document` tool in this conversation, so I can't retrieve a document with the id test-001. The only content I can see is that one line of text, and I won't make up anything beyond it.\n\nIf you meant for me to read something specific, you could paste its text directly into the chat or upload the file itself. What would you like me to do with it",
+        "usage": {
+          "input_tokens": 19,
+          "output_tokens": 111
+        }
+      },
+      "native": {
+        "status": 500,
+        "seconds": 1.19,
+        "error_type": "no_cookie_available",
+        "classification": "no_cookie"
+      },
+      "wasted_reasons": []
+    }
+  ],
+  "production_registry_unchanged": true,
+  "temporary_resources_removed": true
+}

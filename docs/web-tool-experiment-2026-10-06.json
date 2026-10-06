@@ -1,0 +1,1041 @@
+{
+  "primary": {
+    "accounts": [
+      {
+        "account": "cc1",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 5.77,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_9e16c969248a4db0b662af08876753d1",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 1,
+            "response": {
+              "status": 200,
+              "seconds": 5.43,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"update_document\",\"input\":{\"id\":\"CONTRACT-001\",\"quantity\":9}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 481,
+                "output_tokens": 27
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_58e4221dc26444b2a55cf4cae0e518e9",
+                  "name": "update_document",
+                  "input": {
+                    "id": "CONTRACT-001",
+                    "quantity": 9
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 2,
+            "response": {
+              "status": 200,
+              "seconds": 5.34,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 629,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_7ffb5ef5ac2246eaa01bd35c02f376ef",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 3,
+            "response": {
+              "status": 200,
+              "seconds": 6.11,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"Verified after re-reading CONTRACT-001: quantity is 9, currency is EUR, and total is 140. The update to quantity (7 → 9) was applied and the other fields were preserved. One thing to note: the total stayed at 140 even though the quantity changed, so it was not recalculated (at the original 7 units, 140 works out to 20 per unit, which would imply 180 for 9 units). If the total is meant to track quantity, that may need a separate review.\"}",
+              "usage": {
+                "input_tokens": 769,
+                "output_tokens": 116
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Verified after re-reading CONTRACT-001: quantity is 9, currency is EUR, and total is 140. The update to quantity (7 → 9) was applied and the other fields were preserved. One thing to note: the total stayed at 140 even though the quantity changed, so it was not recalculated (at the original 7 units, 140 works out to 20 per unit, which would imply 180 for 9 units). If the total is meant to track quantity, that may need a separate review."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          }
+        ],
+        "scope": "read_update_read_final"
+      },
+      {
+        "account": "cc2",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 11.36,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_3796e56f26f142dba43256e2ca7a5bfd",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb1",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 9.33,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_1425433a2eb94a5d98e34e98631a3128",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 1,
+            "response": {
+              "status": 200,
+              "seconds": 6.2,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"update_document\",\"input\":{\"id\":\"CONTRACT-001\",\"quantity\":9}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 483,
+                "output_tokens": 27
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_6fcc21d767cc43a0b107edde61c1761b",
+                  "name": "update_document",
+                  "input": {
+                    "id": "CONTRACT-001",
+                    "quantity": 9
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 2,
+            "response": {
+              "status": 200,
+              "seconds": 6.82,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 625,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_26c91969a0774b8b9cf288121e0827b3",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 3,
+            "response": {
+              "status": 200,
+              "seconds": 7.3,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"Verified after re-reading CONTRACT-001: quantity is 9 (changed from 7), currency is EUR, and total is 140. Note that the total remained 140 even though the quantity changed from 7 to 9. The update preserved all other fields as requested, so the total was not recalculated. If the total is supposed to scale with quantity, it may need to be corrected separately, but no tool is available here to update it.\"}",
+              "usage": {
+                "input_tokens": 765,
+                "output_tokens": 99
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Verified after re-reading CONTRACT-001: quantity is 9 (changed from 7), currency is EUR, and total is 140. Note that the total remained 140 even though the quantity changed from 7 to 9. The update preserved all other fields as requested, so the total was not recalculated. If the total is supposed to scale with quantity, it may need to be corrected separately, but no tool is available here to update it."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          }
+        ],
+        "scope": "read_update_read_final"
+      },
+      {
+        "account": "ccb2",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 8.18,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_e404f5070c49407eb6f3ed0e6dd22f28",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb3",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 9.32,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_8eb76e0787bd4ccdb838a0eb35ae5bca",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb4",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 5.97,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_a7a022abece94078bef7a085811f5f7e",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb5",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 9.42,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_e1a2c16f0391410497468d5960ad2307",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb6",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 5.93,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_6b953512372c4c7d8e31385b3b3f44ea",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb7",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 11.86,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_a7bfd7f0b1dd44238706ee48aaf5cf52",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb8",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 5.29,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_aef44f6736fe41998517ab4f253d7da9",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          }
+        ],
+        "scope": "initial_read_only"
+      },
+      {
+        "account": "ccb9",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "steps": [
+          {
+            "step": 0,
+            "response": {
+              "status": 200,
+              "seconds": 5.59,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 343,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_8d266477898944dcbf5f36936392139f",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 1,
+            "response": {
+              "status": 200,
+              "seconds": 4.56,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"update_document\",\"input\":{\"id\":\"CONTRACT-001\",\"quantity\":9}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 477,
+                "output_tokens": 27
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_c0002e9964c9475981ad3502360eec94",
+                  "name": "update_document",
+                  "input": {
+                    "id": "CONTRACT-001",
+                    "quantity": 9
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 2,
+            "response": {
+              "status": 200,
+              "seconds": 7.22,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 617,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_e65e4a32fac34cfaa4cdd7f24eb10c7a",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "step": 3,
+            "response": {
+              "status": 200,
+              "seconds": 5.13,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"Verified after the update: quantity is 9, currency is EUR, and total is 140. The quantity changed from 7 to 9 and the currency was preserved. One thing to flag: the total is still 140, the same as before the change. If the total is meant to be derived from quantity (140 / 7 = 20 per unit would give 180 for 9 units), it did not recalculate. The update tool only changes quantity, so I did not alter the total.\"}",
+              "usage": {
+                "input_tokens": 759,
+                "output_tokens": 111
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Verified after the update: quantity is 9, currency is EUR, and total is 140. The quantity changed from 7 to 9 and the currency was preserved. One thing to flag: the total is still 140, the same as before the change. If the total is meant to be derived from quantity (140 / 7 = 20 per unit would give 180 for 9 units), it did not recalculate. The update tool only changes quantity, so I did not alter the total."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          }
+        ],
+        "scope": "read_update_read_final"
+      }
+    ],
+    "production_registry_unchanged": true,
+    "temporary_resources_removed": true
+  },
+  "boundaries": {
+    "accounts": [
+      {
+        "account": "cc1",
+        "readiness": {
+          "status": 200,
+          "seconds": 0.0,
+          "model": null,
+          "stop_reason": null,
+          "blocks": [],
+          "text": "",
+          "usage": null
+        },
+        "proxy_only_firewall": true,
+        "scenarios": [
+          {
+            "name": "none",
+            "response": {
+              "status": 200,
+              "seconds": 6.17,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"Verification is unavailable. The tool_choice is set to none, so I'm not permitted to call read_document on CONTRACT-001, and I have not read or verified its contents.\"}",
+              "usage": {
+                "input_tokens": 234,
+                "output_tokens": 42
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Verification is unavailable. The tool_choice is set to none, so I'm not permitted to call read_document on CONTRACT-001, and I have not read or verified its contents."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          },
+          {
+            "name": "selected",
+            "response": {
+              "status": 200,
+              "seconds": 5.93,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 232,
+                "output_tokens": 23
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_6a48c9bf3b0d46038e5db764d09992f7",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "name": "parallel",
+            "response": {
+              "status": 200,
+              "seconds": 5.57,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-001\"}},{\"name\":\"read_document\",\"input\":{\"id\":\"CONTRACT-002\"}}],\"text\":\"\"}",
+              "usage": {
+                "input_tokens": 236,
+                "output_tokens": 38
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_e02e77692b9b4e9eb1493d58298b2ddf",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-001"
+                  }
+                },
+                {
+                  "type": "tool_use",
+                  "id": "toolu_3419b1f7bee04e03811d63d0b0f878d0",
+                  "name": "read_document",
+                  "input": {
+                    "id": "CONTRACT-002"
+                  }
+                }
+              ],
+              "stop_reason": "tool_use"
+            }
+          },
+          {
+            "name": "tool_error",
+            "response": {
+              "status": 200,
+              "seconds": 5.91,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"The read_document call for ID \\\"MISSING\\\" failed. The tool returned an error: \\\"Document not found. No document contents are available.\\\" I did not invent or modify any document, and no contents exist to report for MISSING.\"}",
+              "usage": {
+                "input_tokens": 331,
+                "output_tokens": 55
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The read_document call for ID \"MISSING\" failed. The tool returned an error: \"Document not found. No document contents are available.\" I did not invent or modify any document, and no contents exist to report for MISSING."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          },
+          {
+            "name": "quoted_example",
+            "response": {
+              "status": 200,
+              "seconds": 8.7,
+              "model": "",
+              "stop_reason": null,
+              "blocks": [
+                "text"
+              ],
+              "text": "{\"calls\":[],\"text\":\"This JSON is a request for a tool operation in the client-executed protocol. The top-level object has two keys. 'calls' is an array of operations the caller should run, and 'text' is a string for the final answer, which is left empty here because the object requests an operation instead of answering. The single entry in 'calls' has a 'name' of 'read_document', which is the declared tool, and an 'input' object of {\\\"id\\\":\\\"CONTRACT-001\\\"}. That input matches the tool's schema, where 'id' is required and must be one of CONTRACT-001, CONTRACT-002 or MISSING, and no other properties are allowed. If the caller executed it, it would read the document CONTRACT-001 and return the contents as a tool result. Since tool_choice is 'none' and you asked me to explain the example without requesting or executing it, I am not making this call. This is only a description of what the JSON would do.\"}",
+              "usage": {
+                "input_tokens": 257,
+                "output_tokens": 212
+              }
+            },
+            "pass": true,
+            "parsed": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "This JSON is a request for a tool operation in the client-executed protocol. The top-level object has two keys. 'calls' is an array of operations the caller should run, and 'text' is a string for the final answer, which is left empty here because the object requests an operation instead of answering. The single entry in 'calls' has a 'name' of 'read_document', which is the declared tool, and an 'input' object of {\"id\":\"CONTRACT-001\"}. That input matches the tool's schema, where 'id' is required and must be one of CONTRACT-001, CONTRACT-002 or MISSING, and no other properties are allowed. If the caller executed it, it would read the document CONTRACT-001 and return the contents as a tool result. Since tool_choice is 'none' and you asked me to explain the example without requesting or executing it, I am not making this call. This is only a description of what the JSON would do."
+                }
+              ],
+              "stop_reason": "end_turn"
+            }
+          }
+        ]
+      }
+    ],
+    "production_registry_unchanged": true,
+    "temporary_resources_removed": true
+  },
+  "production": [
+    {
+      "account": "cc1",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "cc2",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb1",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb2",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb3",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb4",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb5",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb6",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb7",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb8",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    },
+    {
+      "account": "ccb9",
+      "status": "ready",
+      "running": true,
+      "oom_killed": false
+    }
+  ],
+  "services": {
+    "clewdr-manager": "active",
+    "nginx": "active"
+  },
+  "leftover_resources": [],
+  "jsonschema_version": "4.10.3"
+}
