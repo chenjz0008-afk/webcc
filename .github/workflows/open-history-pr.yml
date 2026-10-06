@@ -1,0 +1,32 @@
+name: Open tool history PR
+on:
+  push:
+    branches: [feat/web-tool-history]
+    paths: [.github/workflows/open-history-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh pr list --repo chenjz0008-afk/webcc --head feat/web-tool-history --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            printf '%s\n' "$existing"
+            exit 0
+          fi
+          cat > /tmp/pr-body.md <<'BODY'
+          ## 变更
+          为网页工具实验补充历史 ID、结果顺序、嵌套参数、工具选择和容量检查。添加双文档、版本冲突及误导文档测试。修改仅在实验目录与文档，生产 manager 和官方 ClewdR 保持原样。
+          ## 验证
+          服务器最终 37 项离线测试通过。cc1、ccb1、ccb9 各六轮，共 18 次真实请求通过：双读取、乱序结果、版本冲突恢复、修改和读回。11 个生产账号 ready/running，未 OOM；管理服务与 Nginx active；registry 未变化，临时测试资源已清理。
+          ## 范围
+          合成文档在客户端内存中执行，不能替代真实 WordBuddy 验收。只有固定误导样例通过，不宣称全面防注入。没有精确模型身份、原生工具、SDK/SSE 或生产接入声明。E01 和相关原生待办继续保留。
+          详见 docs/WEB-TOOL-HISTORY.md、测试 JSON、TODO 与 CHANGELOG。此 PR 不部署、不合并。
+          BODY
+          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/web-tool-history --title '验证网页工具历史和文档版本冲突恢复' --body-file /tmp/pr-body.md
