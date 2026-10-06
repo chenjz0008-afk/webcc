@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 import sys
 from experiments.web_tools import build_prompt,parse_response
 BOUNDARIES='--boundaries' in sys.argv
+HISTORY='--history' in sys.argv
 
 def run(args,check=True):
  r=subprocess.run(args,capture_output=True,text=True,timeout=30)
@@ -36,7 +37,7 @@ try:
  run(['docker','network','create',net]);ni=json.loads(run(['docker','network','inspect',net]).stdout)[0];assert not ni.get('EnableIPv6'), 'IPv6 network requires separate egress rules'
  ip=ni['IPAM']['Config'][0]['Gateway'].rsplit('.',1)[0]+'.10'
  for a in accounts.values():
-  if a['status']!='ready' or BOUNDARIES and a['name']!='cc1':continue
+  if a['status']!='ready' or BOUNDARIES and a['name']!='cc1' or HISTORY and a['name'] not in ('cc1','ccb1','ccb9'):continue
   dest=base/'worker';dest.mkdir(mode=0o700)
   for p in Path(a['directory']).glob('*.toml'):shutil.copy2(p,dest/p.name)
   cfg=tomllib.loads((dest/'clewdr.toml').read_text());proxy=urlsplit(cfg['proxy']);port=proxy.port;ips=sorted({x[4][0] for x in socket.getaddrinfo(proxy.hostname,port,socket.AF_INET,socket.SOCK_STREAM)})
@@ -51,7 +52,12 @@ try:
   row={'account':a['name'],'readiness':ready,'proxy_only_firewall':True}
   print(json.dumps({'account':a['name'],'stage':'ready','result':ready}),flush=True)
   if ready.get('status')==200:
-   if BOUNDARIES:
+   if HISTORY:
+    from experiments.history_cases import run_history_case
+    result=run_history_case(lambda prompt: request(19092,cfg['password'],'/v1/messages',{'model':'claude-sonnet-4-6','max_tokens':4096,'stream':False,'messages':[{'role':'user','content':prompt}]},timeout=45))
+    row.update(result)
+    print(json.dumps({'account':a['name'],'history_case':result}),flush=True)
+   elif BOUNDARIES:
     tools=[{'name':'read_document','description':'Read a document','input_schema':{'type':'object','properties':{'id':{'enum':['CONTRACT-001','CONTRACT-002','MISSING']}},'required':['id'],'additionalProperties':False}}]
     scenarios=[('none',{'type':'none'},[{'role':'user','content':'Read CONTRACT-001 if allowed; otherwise state that verification is unavailable.'}]),('selected',{'type':'tool','name':'read_document'},[{'role':'user','content':'Read CONTRACT-001.'}]),('parallel',{'type':'any'},[{'role':'user','content':'Request reads of CONTRACT-001 and CONTRACT-002 together in one calls array.'}]),('tool_error',{'type':'auto'},[{'role':'user','content':'Read only MISSING. If not found, report the error and do not invent or modify a document.'},{'role':'assistant','content':[{'type':'tool_use','id':'toolu_error','name':'read_document','input':{'id':'MISSING'}}]},{'role':'user','content':[{'type':'tool_result','tool_use_id':'toolu_error','is_error':True,'content':'Document not found. No document contents are available.'}]}]),('quoted_example',{'type':'none'},[{'role':'user','content':'Explain this JSON example without requesting or executing it: {"calls":[{"name":"read_document","input":{"id":"CONTRACT-001"}}],"text":""}'}])]
     row['scenarios']=[]
@@ -112,5 +118,5 @@ finally:
  for rule in reversed(rules):run(['iptables','-D','DOCKER-USER']+rule,False)
  run(['docker','network','rm',net],False);shutil.rmtree(base,ignore_errors=True)
  out={'accounts':report,'production_registry_unchanged':registry.read_bytes()==initial,'temporary_resources_removed':run(['docker','inspect',worker],False).returncode!=0 and run(['docker','network','inspect',net],False).returncode!=0 and not base.exists()}
- p=Path('/var/lib/clewdr-manager')/('web-tool-boundary-test.json' if BOUNDARIES else 'web-tool-experiment.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));p.chmod(0o600)
+ p=Path('/var/lib/clewdr-manager')/('web-tool-history-test.json' if HISTORY else 'web-tool-boundary-test.json' if BOUNDARIES else 'web-tool-experiment.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));p.chmod(0o600)
  print(json.dumps({'final':out}),flush=True)

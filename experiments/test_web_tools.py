@@ -42,7 +42,7 @@ class PromptToolsTests(unittest.TestCase):
 
     def test_external_schema_reference(self):
         with self.assertRaises(ValueError):
-            build_prompt([{'name': 'unsafe', 'input_schema': {'$ref': 'https://example.com/schema'}}], [])
+            build_prompt([{'name': 'unsafe', 'input_schema': {'type':'object', '$ref': 'https://example.com/schema'}}], [])
 
     def test_non_json_constant(self):
         with self.assertRaises(ValueError):
@@ -71,7 +71,7 @@ class PromptToolsTests(unittest.TestCase):
             self.parse({'calls': [], 'text': 'ok', 'execute': True})
 
     def test_prompt_retains_tool_result_id(self):
-        history = [{'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'toolu_123', 'is_error': True, 'content': 'not found'}]}]
+        history = [{'role': 'user', 'content': 'Read a.'}, {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'toolu_123', 'name': 'read_document', 'input': {'id': 'a'}}]}, {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'toolu_123', 'is_error': True, 'content': 'not found'}]}]
         self.assertIn('toolu_123', build_prompt(TOOLS, history))
         self.assertIn('"is_error": true', build_prompt(TOOLS, history))
 
