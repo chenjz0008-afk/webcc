@@ -34,7 +34,7 @@ def run_history_case(send):
             row = {'step': step, 'response': response}; record['steps'].append(row)
             if response.get('status') != 200:
                 raise ValueError('Upstream HTTP or transport failure')
-            parsed = parse_response(response['text'], TOOLS, choice); row['parsed'] = parsed
+            parsed = response.get('message') or parse_response(response['text'], TOOLS, choice); row['parsed'] = parsed
             calls = [b for b in parsed['content'] if b['type'] == 'tool_use']
             if step == 0 and (len(calls) != 2 or {b['input']['id'] for b in calls} != {'A', 'B'} or any(b['name'] != 'read_document' for b in calls)):
                 raise ValueError('Initial parallel reads not followed')

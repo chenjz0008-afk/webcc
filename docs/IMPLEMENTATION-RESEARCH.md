@@ -38,3 +38,17 @@ LiteLLM 提供 Messages 接口和多上游适配，可作为候选组件。是�
 单次提示数据最多 128 KiB、32 层嵌套、128 条消息、64 个工具；这些是封装的容量限制，不能当作模型真实 token 上限。超限直接拒绝，不截断或删除历史。不支持的图片、thinking、服务端工具和额外字段明确拒绝。协议不合格请求不发送到账号，更不用于账号隔离判断。
 
 真实门槛为两个工具调用、乱序结果回传、一次版本冲突恢复、修改后回读以及恶意文档文本。只操作内存合成文档，版本冲突由测试器模拟；客户端不提供任意文件或命令执行。通过后才能推进实验网关；SDK、SSE、取消和实际应用仍需独立验收。
+
+## E01 · 主网关实验入口与 SDK
+
+2026-10-06 核查 [Anthropic SSE 协议](https://platform.claude.com/docs/en/build-with-claude/streaming)、[官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python) 与 [SDK 配置](https://platform.claude.com/docs/en/api/sdks/python)：工具流包含内容块起止和 input_json_delta，SDK 可以聚合最终消息；流内错误必须保持 error 事件。SDK 允许明确传入 base_url 和 key，无需读取本机 Claude Code 配置。
+
+复核 [sub2api 固定网关](https://github.com/Wei-Shaw/sub2api/blob/b8dece9000c68815a5b867ca5a1e6f236e173905/backend/internal/handler/gateway_handler.go) 的 wrapReleaseOnDone、账号等待和 FailoverCanceled：请求取消应回收槽位，失败切换应区分已向客户端输出的内容。采用这些生命周期原则，继续复用本项目现有选号与失败计数，不引入 Go 服务或复制其业务代码。
+
+网页提示模式无法从生成中的任意 JSON 片段证明参数合法，因此选择缓冲上游完整响应，校验后生成 SDK 可读的 SSE；等待时可发送 ping。它不是原生逐 token 生成，也不是 Anthropic fine-grained 工具流。实际工具仍由客户端执行；格式失败和客户端取消不计账号异常，HTTP/连接故障复用已有阈值。尚未输出工具块时可以切换账号，输出工具块后不重放。
+
+入口限定 /v1/messages，要求 MANAGER_WEB_TOOLS_ENABLED=true、X-WebCC-Tools: prompt-v1 和明确模型别名 webcc-prompt-v1。默认开关关闭，普通请求维持原来的转发方式。工具适配移到独立 web_tools 包供网关和实验共享，避免生产调用测试程序。该别名表示适配策略，不表示实际 Claude 模型身份；用量保留上游报告，包括额外提示开销，不称为官方计费精确值。
+
+验收包括默认网关回归、普通 SDK 与 SSE 工具往返、错误 ID 发送前拒绝、格式错误不隔离、跨账号切换、三次 500 阈值、排队和生成中的客户端断开。不据这些结果宣称图片、文档块、thinking、strict、Files、真实文档应用或完整官方协议已经支持。
+
+SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/anthropic/)为 1.11.0；[该版项目依赖](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/pyproject.toml)已改用 httpx2。测试使用 SDK 自带 DefaultHttpxClient(trust_env=False)，而不是旧 httpx.Client；显式提供临时 API key 和服务器 loopback Base URL，关闭 SDK 自动重试。依赖只安装到临时目录。

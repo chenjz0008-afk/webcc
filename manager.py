@@ -195,6 +195,9 @@ class Manager:
         self.path = self.data / "registry.json"
         self.image, self.api_key, self.admin_key = image, api_key, admin_key
         self.max_inflight, self.queue_size, self.queue_seconds = max_inflight, queue_size, queue_seconds
+        self.web_tools_enabled = os.environ.get("MANAGER_WEB_TOOLS_ENABLED", "false").lower() == "true"
+        if self.web_tools_enabled:
+            import web_tools.api
         self.retry_attempts = max(1, min(5, int(os.environ.get("MANAGER_RETRY_ATTEMPTS", "3"))))
         self.failure_threshold = max(2, int(os.environ.get("MANAGER_FAILURE_THRESHOLD", "3")))
         self.request_seconds = max(10, float(os.environ.get("MANAGER_REQUEST_SECONDS", "150")))
@@ -521,7 +524,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
-    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None):
+    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -529,6 +532,8 @@ class Manager:
             self.waiting += 1
             try:
                 while True:
+                    if on_wait:
+                        on_wait()
                     eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity)]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
@@ -544,7 +549,7 @@ class Manager:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise Problem(429, "等待可用账号超时")
-                    self.condition.wait(remaining)
+                    self.condition.wait(min(remaining, .2) if on_wait else remaining)
             finally:
                 self.waiting -= 1
 
@@ -740,7 +745,26 @@ class Handler(BaseHTTPRequestHandler):
         self.manager.check_upstream(os.environ.get("MANAGER_FOLLOW", "master"), True)
 
     def forward(self):
+        mode = self.headers.get("X-WebCC-Tools")
+        if mode:
+            if mode != "prompt-v1" or not self.manager.web_tools_enabled or self.command != "POST" or urlsplit(self.path).path != "/v1/messages":
+                self.close_connection = True
+                self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "Experimental tools are disabled or unsupported"}})
+                return
+            from web_tools.gateway import forward
+            forward(self)
+            return
         body = self.body() if self.command == "POST" else None
+        if body:
+            try:
+                payload = json.loads(body)
+            except (ValueError, RecursionError):
+                payload = None
+            reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
+            del payload
+            if reserved_model:
+                self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "prompt-v1 requires X-WebCC-Tools"}})
+                return
         self.request_id = uuid.uuid4().hex
         self.request_deadline = time.monotonic() + self.manager.request_seconds
         attempted = set()

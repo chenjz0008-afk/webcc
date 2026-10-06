@@ -138,3 +138,9 @@ sudo bash deploy/install.sh
 当前运行版本在 Git 中保存为 `server-baseline-2026-10-06` 标签，后续兼容开发使用 `feat/claude-api-compatibility` 分支。小提交分别完成修改和测试，通过后再考虑发布；分支推送不会自动部署服务器。
 
 源码回滚使用 Git，账号资料和运行状态使用服务器私有备份。代码回滚不能恢复 Cookie，也不能撤销已经执行的上游请求。具体步骤见 [开发与回滚](docs/DEVELOPMENT.md)，日常操作见 [运维说明](OPERATIONS.md)。
+
+## 网页工具实验策略
+
+候选代码提供默认关闭的 prompt-v1 实验策略，独立于官方 ClewdR。共享逻辑在 web_tools，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。实际模型身份、官方 strict 和 thinking 签名不属于本模式。
+
+[实验接口](docs/EXPERIMENTAL-TOOLS-API.md)说明开启条件和 SDK 用法；[候选验收](docs/WEB-TOOL-GATEWAY.md)记录普通与 SSE 真实流程。测试需安装 requirements-web-tools.txt 的可选依赖，真实 SDK 测试还需 anthropic；正常模式默认关闭，不依赖 SDK。当前生产未启用此策略。

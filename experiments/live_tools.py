@@ -4,7 +4,8 @@ from urllib.parse import urlsplit
 import sys
 from experiments.web_tools import build_prompt,parse_response
 BOUNDARIES='--boundaries' in sys.argv
-HISTORY='--history' in sys.argv
+GATEWAY='--gateway' in sys.argv
+HISTORY='--history' in sys.argv or GATEWAY
 
 def run(args,check=True):
  r=subprocess.run(args,capture_output=True,text=True,timeout=30)
@@ -54,7 +55,11 @@ try:
   if ready.get('status')==200:
    if HISTORY:
     from experiments.history_cases import run_history_case
-    result=run_history_case(lambda prompt: request(19092,cfg['password'],'/v1/messages',{'model':'claude-sonnet-4-6','max_tokens':4096,'stream':False,'messages':[{'role':'user','content':prompt}]},timeout=45))
+    if GATEWAY:
+     from experiments.gateway_cases import run_gateway_case
+     result=run_gateway_case(a)
+    else:
+     result=run_history_case(lambda prompt: request(19092,cfg['password'],'/v1/messages',{'model':'claude-sonnet-4-6','max_tokens':4096,'stream':False,'messages':[{'role':'user','content':prompt}]},timeout=45))
     row.update(result)
     print(json.dumps({'account':a['name'],'history_case':result}),flush=True)
    elif BOUNDARIES:
@@ -118,5 +123,5 @@ finally:
  for rule in reversed(rules):run(['iptables','-D','DOCKER-USER']+rule,False)
  run(['docker','network','rm',net],False);shutil.rmtree(base,ignore_errors=True)
  out={'accounts':report,'production_registry_unchanged':registry.read_bytes()==initial,'temporary_resources_removed':run(['docker','inspect',worker],False).returncode!=0 and run(['docker','network','inspect',net],False).returncode!=0 and not base.exists()}
- p=Path('/var/lib/clewdr-manager')/('web-tool-history-test.json' if HISTORY else 'web-tool-boundary-test.json' if BOUNDARIES else 'web-tool-experiment.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));p.chmod(0o600)
+ p=Path('/var/lib/clewdr-manager')/('web-tool-gateway-test.json' if GATEWAY else 'web-tool-history-test.json' if HISTORY else 'web-tool-boundary-test.json' if BOUNDARIES else 'web-tool-experiment.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));p.chmod(0o600)
  print(json.dumps({'final':out}),flush=True)
