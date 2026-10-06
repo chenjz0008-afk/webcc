@@ -10,7 +10,7 @@ command -v python3 >/dev/null
 project_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 install -d -m 0755 /opt/clewdr-manager
 if [ "$project_dir" != /opt/clewdr-manager ]; then
-  cp "$project_dir"/manager.py "$project_dir"/updater.py "$project_dir"/serve.py /opt/clewdr-manager/
+  cp "$project_dir"/manager.py "$project_dir"/updater.py "$project_dir"/serve.py "$project_dir"/egress.py /opt/clewdr-manager/
   cp -R "$project_dir"/web_tools /opt/clewdr-manager/
   cp -R "$project_dir"/static /opt/clewdr-manager/
 fi
@@ -21,6 +21,10 @@ if [ ! -f /etc/clewdr-manager.env ]; then
   exit 1
 fi
 install -m 0644 "$project_dir/deploy/clewdr-manager.service" /etc/systemd/system/clewdr-manager.service
+install -m 0644 "$project_dir/deploy/webcc-egress.service" /etc/systemd/system/webcc-egress.service
+install -d /etc/systemd/system/docker.service.d
+install -m 0644 "$project_dir/deploy/docker-egress.conf" /etc/systemd/system/docker.service.d/webcc-egress.conf
 systemctl daemon-reload
+systemctl enable --now webcc-egress
 systemctl enable --now clewdr-manager
 systemctl is-active clewdr-manager

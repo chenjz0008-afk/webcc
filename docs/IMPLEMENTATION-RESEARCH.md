@@ -52,3 +52,9 @@ LiteLLM 提供 Messages 接口和多上游适配，可作为候选组件。是�
 验收包括默认网关回归、普通 SDK 与 SSE 工具往返、错误 ID 发送前拒绝、格式错误不隔离、跨账号切换、三次 500 阈值、排队和生成中的客户端断开。不据这些结果宣称图片、文档块、thinking、strict、Files、真实文档应用或完整官方协议已经支持。
 
 SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/anthropic/)为 1.11.0；[该版项目依赖](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/pyproject.toml)已改用 httpx2。测试使用 SDK 自带 DefaultHttpxClient(trust_env=False)，而不是旧 httpx.Client；显式提供临时 API key 和服务器 loopback Base URL，关闭 SDK 自动重试。依赖只安装到临时目录。
+
+## 2026-10-06：代理出口限制
+
+依据 Docker 官方 iptables 文档核查当前服务器为 iptables-nft 兼容后端。使用专用 bridge、DOCKER-USER 与 INPUT/FORWARD 防火墙链；先安装规则再启动容器，启动恢复失败不放行 Docker。官方 ClewdR 固定提交 061c6d8 的 config/clewdr_config.rs 使用 wreq Proxy::all；本地 SOCKS5 DNS 依赖在临时测试中导致 500，改为 SOCKS5h 后不开放直接 DNS 仍真实回复成功。
+
+来源：https://docs.docker.com/engine/network/firewall-iptables/ ，https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/config/clewdr_config.rs 。实现和边界见 EGRESS.md。

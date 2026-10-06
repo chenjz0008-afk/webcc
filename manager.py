@@ -287,13 +287,33 @@ class Manager:
             return listener.getsockname()[1]
 
     def run_worker(self, account, image=None, directory=None, port=None, name=None):
+        network = self.worker_network(account, directory)
         self.docker("run", "-d", "--name", name or account["container"], "--restart", "unless-stopped",
+                    *network,
                     "--label", "clewdr-manager=true", "--label", "account-id=" + account["id"],
                     "--publish", "127.0.0.1:{}:8484".format(port or account["port"]),
                     "--mount", "type=bind,src={},dst=/etc/clewdr".format(directory or account["directory"]),
                     "--log-driver", "none", "--read-only", "--tmpfs", "/tmp:rw,nosuid,noexec,size=16m",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "0:0",
                     "--memory", "256m", "--pids-limit", "64", "--cpus", "1", image or account["image"])
+
+    def worker_network(self, account, directory=None):
+        if os.environ.get("MANAGER_PROXY_ONLY", "false").lower() != "true":
+            return []
+        import egress
+        path = Path(directory or account["directory"]) / "clewdr.toml"
+        text = path.read_text()
+        config = tomllib.loads(text)
+        try:
+            proxy = config["proxy"]
+            if proxy.startswith("socks5://"):
+                proxy = "socks5h://" + proxy[len("socks5://"):]
+            network = egress.prepare(self.data, account["id"], proxy)
+            if proxy != config["proxy"]:
+                private_write(path, re.sub(r"(?m)^proxy\s*=.*$", lambda _: "proxy = " + json.dumps(proxy), text))
+            return network
+        except egress.EgressError:
+            raise Problem(503, "出口白名单未能就绪，拒绝启动账号容器") from None
 
     def wait_ready(self, port):
         for _ in range(40):
@@ -517,6 +537,11 @@ class Manager:
                 elif self.inspect(account["container"])["status"] == "missing":
                     self.run_worker(account)
                 else:
+                    network = self.worker_network(account)
+                    if network:
+                        existing = json.loads(self.docker("inspect", account["container"]))[0]
+                        if existing["HostConfig"]["NetworkMode"] != network[1]:
+                            raise Problem(503, "旧容器尚未迁移至代理专用网络，拒绝启动")
                     self.docker("start", account["container"])
                 account["version"] = self.wait_ready(account["port"])
                 account.update(consecutive_failures=0, cooldown_until=0)
