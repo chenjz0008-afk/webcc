@@ -35,5 +35,8 @@ jobs:
           gh pr create --repo chenjz0008-afk/webcc --base main --head feat/claude-api-compatibility --title '记录账号验收并验证网页工具适配方案' --body-file /tmp/pr-body.md > /tmp/pr-result.txt 2>&1
           result=$?
           cat /tmp/pr-result.txt
+          if [ "$result" -ne 0 ]; then
+            while IFS= read -r line; do printf "::error::%s\n" "$line"; done < /tmp/pr-result.txt
+          fi
           cat /tmp/pr-result.txt >> "$GITHUB_STEP_SUMMARY"
           exit "$result"
