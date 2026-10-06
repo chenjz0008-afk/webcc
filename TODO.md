@@ -1,6 +1,6 @@
 # Claude API 能力完善待办
 
-更新时间：2026-10-06。开发分支：`feat/claude-api-compatibility`。
+更新时间：2026-10-06。当前开发分支：`feat/web-tool-history`。
 
 这里仅保留未完成事项。完整背景见 [方案](docs/CLAUDE-API-PLAN.md)，已完成内容见 [变更记录](CHANGELOG.md)，回滚方式见 [开发说明](docs/DEVELOPMENT.md)。
 
@@ -30,7 +30,7 @@
 - [ ] E01 将已验证的提示工具实验接入主项目的明确实验策略。
   - 基础实验结果见 [报告](docs/WEB-TOOL-EXPERIMENT.md)，不能删除或替代原生 C05—C11 的验收要求。
   - 先核查成熟实现的错误、历史和流式处理，再做最小适配；保持普通请求行为，禁止静默降级。
-  - 接入前验证复杂 Schema、工具结果 ID 匹配、工具错误恢复、双工具结果回传、恶意文档及上下文上限。
+  - 嵌套 Schema、历史 ID 校验、双结果回传、版本冲突恢复和固定误导文档样例已通过，见 [本轮报告](docs/WEB-TOOL-HISTORY.md)。本项尚未完成；继续验证更广的恶意内容、递归 Schema 与真实上下文边界。
   - 验证 SDK、SSE、取消、限流与切换后不重复执行；实际应用完成读取、修改和读回。近似模式不宣称提供精确模型身份、官方 strict 或 thinking 签名。
 
 ## B. Messages 和客户端工具

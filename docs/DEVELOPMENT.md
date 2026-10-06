@@ -6,6 +6,8 @@
 
 `feat/claude-api-compatibility` 用于逐步兼容完整 Claude API。每个提交只处理一个明确问题，提交说明包含测试结果。推送分支不会触发生产部署。
 
+PR #2 已合并；下一阶段从合并后的 main 创建 `feat/web-tool-history`，先补实验工具历史与错误恢复，测试后单独提交。
+
 ## 检查
 
 后端使用 `python3 -m unittest discover -s tests -v`，前端使用 `npm ci`、`npm run build` 和 `node test_accounts.mjs`。真实上游测试使用服务器隔离环境，不使用开发者本机的 Claude 登录态或项目资料。
