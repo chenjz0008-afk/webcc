@@ -644,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
     def authenticate(self, admin=False):
         candidate = self.headers.get("Authorization", "")
         candidate = candidate[7:] if candidate.startswith("Bearer ") else ""
-        if not admin and self.path in POST_ROUTES:
+        if not admin:
             candidate = self.headers.get("x-api-key") or candidate
         expected = self.manager.admin_key if admin else self.manager.api_key
         if not candidate or not hmac.compare_digest(candidate.encode(), expected.encode()):
@@ -676,45 +676,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         try:
-            if self.command == "GET" and (self.path == "/" or self.path.startswith("/assets/")):
-                name = "index.html" if self.path == "/" else self.path.lstrip("/")
+            target = urlsplit(self.path)
+            if target.scheme or target.netloc or target.fragment:
+                raise Problem(400, "请求地址必须是本站路径")
+            route = target.path
+            if self.command == "GET" and (route == "/" or route.startswith("/assets/")):
+                name = "index.html" if route == "/" else route.lstrip("/")
                 base = (ROOT / "static").resolve()
                 path = (base / name).resolve()
                 if base not in path.parents or not path.is_file():
                     raise Problem(404, "文件不存在")
                 content_type = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}.get(path.suffix, "application/octet-stream")
                 self.respond(200, path.read_bytes(), content_type)
-            elif self.path == "/healthz" and self.command == "GET":
+            elif route == "/healthz" and self.command == "GET":
                 self.respond(200, {"ok": True})
-            elif self.path.startswith("/admin/"):
+            elif route.startswith("/admin/"):
                 self.authenticate(admin=True)
-                if self.path == "/admin/accounts" and self.command == "GET":
+                if route == "/admin/accounts" and self.command == "GET":
                     self.respond(200, self.manager.snapshot())
-                elif self.path == "/admin/accounts" and self.command == "POST":
+                elif route == "/admin/accounts" and self.command == "POST":
                     fields = json.loads(self.body(1024 * 1024))
                     self.respond(201, {"id": self.manager.add(fields)})
-                elif self.path == "/admin/proxy/test" and self.command == "POST":
+                elif route == "/admin/proxy/test" and self.command == "POST":
                     self.respond(200, self.manager.test_proxy(json.loads(self.body(16384))))
-                elif self.path == "/admin/update" and self.command == "POST":
+                elif route == "/admin/update" and self.command == "POST":
                     if not self.manager.operations.acquire(blocking=False):
                         raise Problem(409, "管理操作正在进行")
                     self.manager.operations.release()
                     threading.Thread(target=self.update_background, daemon=True).start()
                     self.respond(202, {"ok": True})
                 else:
-                    detail = re.fullmatch(r"/admin/accounts/([a-f0-9]{12})/details", self.path)
+                    detail = re.fullmatch(r"/admin/accounts/([a-f0-9]{12})/details", route)
                     if detail and self.command in {"GET", "POST"}:
                         identity = detail.group(1)
                         result = self.manager.account_details(identity) if self.command == "GET" else self.manager.update_account(identity, json.loads(self.body(16384)))
                         self.respond(200, result)
                         return
-                    match = re.fullmatch(r"/admin/accounts/([a-f0-9]{12})/(pause|resume|disable|probe|proxy-test)", self.path)
+                    match = re.fullmatch(r"/admin/accounts/([a-f0-9]{12})/(pause|resume|disable|probe|proxy-test)", route)
                     if not match or self.command != "POST":
                         raise Problem(404, "接口不存在")
                     identity, action = match.groups()
                     result = self.manager.check_account_proxy(identity) if action == "proxy-test" else self.manager.probe(identity) if action == "probe" else self.manager.control(identity, action)
                     self.respond(200, result or {"ok": True})
-            elif (self.command == "GET" and self.path in GET_ROUTES) or (self.command == "POST" and self.path in POST_ROUTES):
+            elif (self.command == "GET" and route in GET_ROUTES) or (self.command == "POST" and route in POST_ROUTES):
                 self.authenticate()
                 self.forward()
             else:

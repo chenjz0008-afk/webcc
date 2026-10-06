@@ -38,11 +38,12 @@ class Worker(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        self.seen.append({"path": self.path, "headers": dict(self.headers), "body": b""})
         self.reply(json.dumps({"data": [{"id": "claude-sonnet-4-6"}]}).encode())
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
-        self.seen.append({"headers": dict(self.headers), "body": body})
+        self.seen.append({"path": self.path, "headers": dict(self.headers), "body": body})
         configured = self.replies.get(self.headers.get("Authorization"))
         if configured:
             self.reply(configured[1], configured[0], configured[2] if len(configured) > 2 else "application/json")
@@ -126,6 +127,51 @@ class ManagerTests(unittest.TestCase):
 
     def payload(self, stream=False):
         return {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "Hi"}], "stream": stream}
+
+    def test_message_query_routes_preserve_body_and_query(self):
+        for path in ("/v1/messages?beta=true", "/code/v1/messages?beta=true", "/v1/chat/completions?trace=one%20two"):
+            with self.subTest(path=path):
+                body = {**self.payload(), "tools": [{"name": "lookup", "input_schema": {"type": "object"}}]}
+                status, _, _ = self.request("POST", path, body, key="", extra={"x-api-key": "api-password"})
+                self.assertEqual(status, 200)
+                self.assertEqual(Worker.seen[-1]["path"], path)
+                self.assertEqual(json.loads(Worker.seen[-1]["body"]), body)
+                self.assertNotIn("x-api-key", {k.lower(): v for k, v in Worker.seen[-1]["headers"].items()})
+                self.assert_idle()
+
+    def test_model_query_accepts_sdk_api_key(self):
+        for path in ("/v1/models", "/v1/models?limit=1", "/code/v1/models?limit=1"):
+            with self.subTest(path=path):
+                status, _, body = self.request("GET", path, key="", extra={"x-api-key": "api-password"})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body)["data"][0]["id"], "claude-sonnet-4-6")
+                self.assertEqual(Worker.seen[-1]["path"], path)
+
+    def test_query_route_requires_valid_credentials(self):
+        for method, path in (("POST", "/v1/messages?beta=true"), ("GET", "/v1/models?limit=1")):
+            with self.subTest(path=path):
+                status, _, _ = self.request(method, path, self.payload() if method == "POST" else None,
+                                             key="", extra={"x-api-key": "wrong"})
+                self.assertEqual(status, 401)
+        self.assertEqual(Worker.seen, [])
+
+    def test_query_does_not_make_unknown_routes_public(self):
+        self.assertEqual(self.request("POST", "/v1/not-an-endpoint?beta=true", self.payload())[0], 404)
+        self.assertEqual(Worker.seen, [])
+
+    def test_routing_rejects_external_request_targets(self):
+        for path, expected in (("https://example.com/v1/messages?beta=true", 400),
+                               ("//example.com/v1/messages", 404), ("/v1/messages#fragment", 400)):
+            with self.subTest(path=path):
+                self.assertEqual(self.request("POST", path, self.payload())[0], expected)
+        self.assertEqual(Worker.seen, [])
+
+    def test_admin_query_keeps_admin_authentication(self):
+        self.assertEqual(self.request("GET", "/admin/accounts?view=list", key="",
+                                      extra={"x-api-key": "api-password"})[0], 401)
+        status, headers, _ = self.request("GET", "/admin/accounts?view=list", key="admin-password")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
 
     def test_proxy_rejects_incomplete_ipv4(self):
         with self.assertRaises(Problem):
