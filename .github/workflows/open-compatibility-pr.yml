@@ -1,4 +1,4 @@
-name: Open compatibility PR
+name: Open compatibility PR after permission update
 on:
   push:
     branches: [feat/claude-api-compatibility]
