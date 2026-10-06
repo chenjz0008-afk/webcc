@@ -1,0 +1,34 @@
+name: Open compatibility PR
+on:
+  push:
+    branches: [feat/claude-api-compatibility]
+    paths: [.github/workflows/open-compatibility-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh pr list --repo chenjz0008-afk/webcc --head feat/claude-api-compatibility --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            printf '%s\n' "$existing"
+            exit 0
+          fi
+          cat > /tmp/pr-body.md <<'BODY'
+          ## 变更
+          记录已挂账号的真实能力验收、实现前调研和独立网页提示工具实验，完善待办与回滚说明。
+          ## 验证
+          11 个账号普通回复通过；25 次提示工具请求及 14 项离线解析测试通过。3 个账号完成合成文档四轮读写。原生通道受 Free 资格限制，完整报告见 docs/WEB-TOOL-EXPERIMENT.md。
+          ## 边界
+          实验未接入生产，不等同官方原生工具协议。复杂历史、SDK、SSE、取消和实际应用验收仍保留在 TODO。生产服务和官方 ClewdR 项目未修改。
+          BODY
+          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/claude-api-compatibility --title '记录账号验收并验证网页工具适配方案' --body-file /tmp/pr-body.md
