@@ -31,4 +31,9 @@ jobs:
           ## 边界
           实验未接入生产，不等同官方原生工具协议。复杂历史、SDK、SSE、取消和实际应用验收仍保留在 TODO。生产服务和官方 ClewdR 项目未修改。
           BODY
-          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/claude-api-compatibility --title '记录账号验收并验证网页工具适配方案' --body-file /tmp/pr-body.md
+          set +e
+          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/claude-api-compatibility --title '记录账号验收并验证网页工具适配方案' --body-file /tmp/pr-body.md > /tmp/pr-result.txt 2>&1
+          result=$?
+          cat /tmp/pr-result.txt
+          cat /tmp/pr-result.txt >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
