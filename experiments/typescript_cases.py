@@ -10,7 +10,7 @@ from experiments.history_cases import TOOLS, run_history_case
 from web_tools.api import MODEL
 
 
-def run_typescript_case(account, node, script, streamed, tls_context=None, ca_file=None, file_documents=False, scoped_key=False):
+def run_typescript_case(account, node, script, streamed, tls_context=None, ca_file=None, file_documents=False, scoped_key=False, document_review=False):
     with tempfile.TemporaryDirectory(prefix='webcc-ts-manager-') as data:
         manager = Manager(data, account['image'], secrets.token_hex(24), secrets.token_hex(24))
         manager.web_tools_enabled = True
@@ -49,7 +49,16 @@ def run_typescript_case(account, node, script, streamed, tls_context=None, ca_fi
                 store = MarkdownDocuments(Path(data) / 'documents')
             else:
                 store = None
-            result = run_history_case(send, store)
+            if document_review:
+                from experiments.document_cases import run_document_case
+                renderer = Path(script).with_name('render_markdown.mjs')
+                def render(documents):
+                    process = subprocess.run([str(node), str(renderer)], input=json.dumps(documents),
+                                             env={'PATH': '/usr/bin:/bin'}, capture_output=True, text=True, timeout=10, check=True)
+                    return json.loads(process.stdout)
+                result = run_document_case(send, Path(data) / 'review-documents', render if renderer.exists() else None)
+            else:
+                result = run_history_case(send, store)
             if store:
                 result['files_preserved'] = store.verify()
                 result['pass'] &= result['files_preserved']
