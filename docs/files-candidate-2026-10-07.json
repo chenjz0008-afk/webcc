@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-07",
+  "candidate_only": true,
+  "account": "ccb9",
+  "checks": [
+    {
+      "file": "allocation.pdf",
+      "real_model_response": "120",
+      "download_bytes_match": true,
+      "cross_key_denied": true,
+      "deleted_reference_denied_before_inference": true
+    },
+    {
+      "file": "allocation.txt",
+      "real_model_response": "120",
+      "download_bytes_match": true,
+      "cross_key_denied": true,
+      "deleted_reference_denied_before_inference": true
+    }
+  ],
+  "model_requests": 2,
+  "pass": true,
+  "production_registry_unchanged": true,
+  "temporary_container_removed": true,
+  "temporary_directory_removed": true,
+  "regression": {
+    "full_suite": {
+      "tests": 113,
+      "pass": true,
+      "seconds": 81.091
+    },
+    "final_files_suite": {
+      "tests": 9,
+      "pass": true,
+      "seconds": 3.864
+    }
+  }
+}

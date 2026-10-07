@@ -34,10 +34,10 @@ PDF 转换不下载调用方 URL，不提供 Files 资源 ID。实验工具策�
 | C09 strict | 本地参数校验 | 扩充支持的 Schema 与失败处理 | 无官方约束采样 |
 | C11 Thinking 与签名 | 未完成原生验收 | 单独验证现有上游块与历史行为 | 不生成或伪造 Anthropic 签名 |
 | C15 图片、PDF、引用 | 内联图片/PDF 部分实现 | 覆盖页面、布局、图片格式；单独建设引用定位 | 文本引文不是原生 citations |
-| C16 Files | 尚未实现生命周期接口 | 用户隔离的本地资源库、上传后展开到网页请求 | 自建 ID 不是官方 Files ID；需验证删除、配额与账号切换 |
+| C16 Files | 平台资源生命周期候选实测通过 | 用户隔离的本地资源库、上传后展开到网页请求 | 自建 ID 不是官方 Files ID；需验证删除、配额与账号切换 |
 | C18 Prompt Caching | 尚无原生缓存证据 | 可优化本地存储与请求构造 | 不能返回伪造的 cache_read/cache_creation 用量 |
-| C19 搜索、抓取 | 原生工具协议未验证 | 复用搜索服务与受控抓取，以明确的自建工具执行 | 网页按钮不证明 API 服务端结果、引用与 pause_turn 支持 |
-| C20 代码执行、生成文件 | 未实现 | 无网络的隔离沙箱、资源额度、归属及回收 | 服务器资源需评估；自建沙箱不是 Anthropic container |
+| C19 搜索、抓取 | 网页搜索和读取已实测；原生协议待适配 | 复用搜索服务与受控抓取，以明确的自建工具执行 | 网页按钮不证明 API 服务端结果、引用与 pause_turn 支持 |
+| C20 代码执行、生成文件 | 网页 bash_tool 与 CSV 资源已实测；下载待适配 | 无网络的隔离沙箱、资源额度、归属及回收 | 服务器资源需评估；自建沙箱不是 Anthropic container |
 | C21 MCP、发现、延迟加载 | 未实现 Connector | 复用 MCP SDK，映射允许的客户端工具并管理认证 | 不声称官方 Connector；需要连接与跨用户隔离验收 |
 | C22 程序化工具调用 | 未实现 | 依赖沙箱与可恢复执行状态，再实现工具调用桥接 | 不是仅增加 allowed_callers 字段即可兑现 |
 | C23 Skills | 未实现 API 生命周期 | 沙箱运行受控技能目录，明确版本与产物归属 | 不冒充官方 Skills API；依赖代码执行与 Files |
@@ -52,3 +52,9 @@ PDF 转换不下载调用方 URL，不提供 Files 资源 ID。实验工具策�
 - [MCP Connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)、[工具发现](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)：发现与认证有独立协议。
 - [Prompt Caching](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching)：缓存统计来自上游，不由响应缓存替代。
 - [代码执行](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool)、[程序化工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)、[Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)：依赖执行环境与资源生命周期。
+
+## 2026-10-07 补充
+
+生产已开启 11 个账号的网页搜索，新账号默认开启。公网返回实际 web_search 和来源列表。现有账号同时可调用 Claude 云端 bash_tool，已生成 CSV 资源；生成文件下载尚未完成。优先复用内置能力，暂不需要 Brave Search 或 E2B。见 [搜索与沙箱](WEB-SEARCH-SANDBOX.md)。
+
+平台文件资源已在独立容器完成 PDF/文本引用、原字节下载、跨密钥隔离及删除后拒绝验收，尚未部署。该资源库不同于 Claude 云端沙箱文件，不把两者混为同一下载能力。见 [平台 Files](MANAGED-FILES.md)。

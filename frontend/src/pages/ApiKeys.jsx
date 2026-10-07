@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import SecretField from '../components/SecretField.jsx';
 
-const permissions = {messages: '消息调用', models: '模型列表', experimental_tools: '实验工具'};
+const permissions = {messages: '消息调用', models: '模型列表', experimental_tools: '实验工具', files: '文件资源'};
 const initial = {name: '', accounts: [], scopes: ['messages', 'models'], rpm: 60, expiry: ''};
 export default function ApiKeys({api, data, notify}) {
   const [keys, setKeys] = useState([]), [open, setOpen] = useState(false);

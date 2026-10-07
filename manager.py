@@ -13,6 +13,7 @@ import time
 import tomllib
 import uuid
 from api_keys import ApiKeys, KeyProblem
+from web_files import FileStore, FileProblem
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -210,6 +211,7 @@ class Manager:
         self.last_used, self.dispatches = {}, {}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
         self.api_keys = ApiKeys(self)
+        self.files = FileStore(self.data)
         self.image = self.state["update"].get("image", image)
         for account in self.state["accounts"].values():
             account.setdefault("session_imported_at", account.get("created_at", int(time.time())))
@@ -359,7 +361,7 @@ class Manager:
                         "proxy": proxy, "check_update": False, "auto_update": False,
                         "max_retries": 5, "skip_restricted": True, "skip_first_warning": False,
                         "skip_second_warning": False, "no_fs": False, "log_to_file": False,
-                        "preserve_chats": False, "web_search": False, "enable_web_count_tokens": False,
+                        "preserve_chats": False, "web_search": True, "enable_web_count_tokens": False,
                         "sanitize_messages": False, "skip_non_pro": False, "skip_normal_pro": False,
                         "skip_rate_limit": True, "use_real_roles": True}
             config = "\n".join(k + " = " + json.dumps(v, ensure_ascii=False) for k, v in settings.items())
@@ -682,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             raise ClientGone()
 
-    def authenticate(self, admin=False):
+    def authenticate(self, admin=False, scope=None):
         candidate = self.headers.get("Authorization", "")
         candidate = candidate[7:] if candidate.startswith("Bearer ") else ""
         if not admin:
@@ -691,7 +693,7 @@ class Handler(BaseHTTPRequestHandler):
         if candidate and hmac.compare_digest(candidate.encode(), expected.encode()):
             return
         if not admin and candidate:
-            scope = "models" if self.command == "GET" else "messages"
+            scope = scope or ("models" if self.command == "GET" else "messages")
             self.caller_key, self.allowed_accounts = self.manager.api_keys.authenticate(candidate, scope, bool(self.headers.get("X-WebCC-Tools")))
             return
         raise Problem(401, "认证失败")
@@ -722,6 +724,9 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def do_POST(self):
+        self.handle_request()
+
+    def do_DELETE(self):
         self.handle_request()
 
     def handle_request(self):
@@ -777,6 +782,9 @@ class Handler(BaseHTTPRequestHandler):
                     identity, action = match.groups()
                     result = self.manager.check_account_proxy(identity) if action == "proxy-test" else self.manager.probe(identity) if action == "probe" else self.manager.control(identity, action)
                     self.respond(200, result or {"ok": True})
+            elif route == '/v1/files' or route.startswith('/v1/files/'):
+                from web_files import route as file_route
+                file_route(self, target)
             elif (self.command == "GET" and route in GET_ROUTES) or (self.command == "POST" and route in POST_ROUTES):
                 self.authenticate()
                 self.forward()
@@ -786,6 +794,9 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.retry_after = getattr(error, "retry_after", None)
             self.respond(error.status, {"error": {"message": str(error), "type": "manager_error"}})
+        except FileProblem as error:
+            self.close_connection = True
+            self.respond(error.status, {"error": {"message": str(error)}})
         except (ValueError, TypeError, AttributeError):
             self.close_connection = True
             self.respond(400, {"error": {"message": "请求格式无效"}})
@@ -819,8 +830,11 @@ class Handler(BaseHTTPRequestHandler):
             if urlsplit(self.path).path == '/v1/messages':
                 from web_documents import prepare, DocumentProblem
                 try:
-                    if prepare(payload):
+                    payload, resolved = self.manager.files.resolve(self.caller_key or 'platform', payload)
+                    if prepare(payload) or resolved:
                         body = json.dumps(payload, ensure_ascii=False).encode()
+                        if len(body) > 32 * 1024 * 1024:
+                            raise Problem(413, 'Expanded file references exceed 32 MiB')
                 except DocumentProblem as error:
                     raise Problem(400, str(error)) from None
             del payload
