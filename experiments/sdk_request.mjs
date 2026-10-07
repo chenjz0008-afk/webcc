@@ -2,9 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
-const {baseURL, apiKey, streamed, ...params} = JSON.parse(input);
+const {baseURL, apiKey, streamed, experimental = true, ...params} = JSON.parse(input);
 const client = new Anthropic({apiKey, baseURL, maxRetries: 0, timeout: 60000,
-  defaultHeaders: {'X-WebCC-Tools': 'prompt-v1'}});
+  defaultHeaders: experimental ? {'X-WebCC-Tools': 'prompt-v1'} : {}});
 try {
   let message, requestId;
   if (streamed) {

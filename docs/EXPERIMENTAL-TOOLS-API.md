@@ -1,6 +1,6 @@
 # 实验工具接口
 
-此接口用于候选环境中的网页客户端工具适配，不是生产 API 能力声明。官方 ClewdR 容器保持原样。
+此接口提供网页客户端工具适配，于 2026-10-07 发布生产。它具有下文说明的限制，不等同完整 Claude 原生 API。官方 ClewdR 容器保持原样。
 
 ## 架构
 
@@ -19,17 +19,21 @@
 | 请求头 | X-WebCC-Tools: prompt-v1 |
 | model | webcc-prompt-v1 |
 | max_tokens | 16—8192 |
-| tools | 1—64 个客户端工具，name、description、input_schema |
+| tools | 1—64 个客户端工具，name、description、input_schema，可选 strict 布尔值 |
 | messages | 交替的 user/assistant，支持文本、tool_use、文本 tool_result |
 | system | 可选文本 |
 | stream | true 或 false |
 | tool_choice | auto、none、any、tool，可带 disable_parallel_tool_use |
 
-显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking、strict、图像、文档块和额外参数在该模式下明确拒绝。普通模式不进入此适配器。
+显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking、图像、文档块和额外参数在该模式下明确拒绝。普通模式不进入此适配器。
+
+## 参数校验
+
+strict 仅接受布尔值。该实验策略对所有工具返回参数进行本地 JSON Schema 校验；不合规结果返回错误，不交给客户端执行。strict=true 不启用官方约束采样，也不保证模型第一次生成一定成功。JSON 和 SSE 响应以 X-WebCC-Adapter: prompt-v1; schema-validated; no-native-strict; buffered 标明实际策略。
 
 ## Python SDK
 
-以下示例连接候选网关；BASE_URL 和 key 使用候选环境实际值，不应理解为当前公网生产已开启。
+生产 Base URL 使用 https://165.154.205.213；key 使用平台全局密钥，或拥有 messages 与 experimental_tools 权限的独立调用密钥。
 
 ```python
 import anthropic
@@ -77,4 +81,4 @@ HTTP/连接错误沿用主项目的阈值与冷却，500 达到阈值后才隔�
 
 历史最多 128 条消息，提示数据最多 128 KiB，最多 32 层嵌套；历史工具 ID 必须唯一，结果紧接调用，多个结果可乱序。用量来自上游报告，包括包装提示和原始 JSON 输出，不是转换后内容的精确 token 计数。
 
-本轮验证结果在独立测试报告中记录。实际 WordBuddy、TypeScript SDK、生产 HTTPS、任意提示注入防护以及完整官方 API 仍需后续验收。
+验收结果见网页能力说明与发布记录。实际 WorkBuddy、广泛提示注入防护及完整官方 API 仍需后续验收。

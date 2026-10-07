@@ -10,7 +10,7 @@ from experiments.history_cases import TOOLS, run_history_case
 from web_tools.api import MODEL
 
 
-def run_typescript_case(account, node, script, streamed, tls_context=None, ca_file=None, file_documents=False, scoped_key=False, document_review=False):
+def run_typescript_case(account, node, script, streamed, tls_context=None, ca_file=None, file_documents=False, scoped_key=False, document_review=False, basic_capabilities=False):
     with tempfile.TemporaryDirectory(prefix='webcc-ts-manager-') as data:
         manager = Manager(data, account['image'], secrets.token_hex(24), secrets.token_hex(24))
         manager.web_tools_enabled = True
@@ -25,8 +25,9 @@ def run_typescript_case(account, node, script, streamed, tls_context=None, ca_fi
         try:
             trace_ids = []
             def send_payload(payload, trust=True):
-                request = dict(baseURL=f'{"https" if tls_context else "http"}://127.0.0.1:{server.server_port}', apiKey=credential['key'] if credential else manager.api_key,
-                               streamed=streamed, model=MODEL, max_tokens=4096, **payload)
+                request = {'baseURL': f'{"https" if tls_context else "http"}://127.0.0.1:{server.server_port}',
+                           'apiKey': credential['key'] if credential else manager.api_key,
+                           'streamed': streamed, 'model': MODEL, 'max_tokens': 4096, **payload}
                 env = {'PATH': '/usr/bin:/bin'}
                 if ca_file and trust:
                     env['NODE_EXTRA_CA_CERTS'] = str(ca_file)
@@ -49,7 +50,10 @@ def run_typescript_case(account, node, script, streamed, tls_context=None, ca_fi
                 store = MarkdownDocuments(Path(data) / 'documents')
             else:
                 store = None
-            if document_review:
+            if basic_capabilities:
+                from experiments.basic_cases import run_basic_cases
+                result = run_basic_cases(send_payload, Path(script).parent / 'fixtures')
+            elif document_review:
                 from experiments.document_cases import run_document_case
                 renderer = Path(script).with_name('render_markdown.mjs')
                 def render(documents):

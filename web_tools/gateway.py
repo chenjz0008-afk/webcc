@@ -12,6 +12,7 @@ from web_tools.api import complete, events, prepare
 
 
 def forward(handler):
+    handler.adapter = 'prompt-v1; schema-validated; no-native-strict; buffered'
     handler.request_id = uuid.uuid4().hex
     handler.request_deadline = time.monotonic() + handler.manager.request_seconds
     sent = False
@@ -99,7 +100,7 @@ def forward(handler):
                 for key, value in [('Content-Type', 'text/event-stream'), ('Transfer-Encoding', 'chunked'),
                     ('Cache-Control', 'no-store'), ('X-Accel-Buffering', 'no'),
                     ('X-Request-Id', handler.request_id), ('Request-Id', handler.request_id),
-                    ('X-WebCC-Adapter', 'prompt-v1; buffered')]:
+                    ('X-WebCC-Adapter', handler.adapter)]:
                     handler.send_header(key, value)
                 handler.end_headers()
                 sent = True

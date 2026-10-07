@@ -1,6 +1,6 @@
 # ClewdR API 接入说明
 
-文档版本：2026-10-01
+文档版本：2026-10-07
 
 ## 1. 连接配置
 
@@ -179,3 +179,9 @@ print(content)
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
 当前提供 Chat Completions 与 Claude Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
+
+## 网页工具与 PDF 输入
+
+POST /v1/messages 支持本平台的显式网页工具策略，要求 X-WebCC-Tools: prompt-v1 和 model=webcc-prompt-v1。该策略支持工具选择和本地参数校验，工具由客户端执行；不提供官方 strict 约束采样或 Thinking 签名。详细请求格式见 [工具接口](docs/EXPERIMENTAL-TOOLS-API.md)。
+
+普通 Messages 支持内联 base64 application/pdf document 输入。单文件最多 20 MiB，请求总大小最多 32 MiB；URL、file_id、原生引用和缓存扩展尚不支持。PDF 与实验工具在同一请求中混用尚未支持。完整边界见 [网页能力范围](docs/WEB-ACCOUNT-CAPABILITIES.md)。

@@ -31,8 +31,10 @@ def check_tools(tools):
     if not isinstance(tools, list) or not tools or len(tools) > 64:
         raise ValueError('Experimental tools require 1 to 64 definitions')
     for tool in tools:
-        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema'}:
+        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict'}:
             raise ValueError('Unsupported experimental tool definition')
+        if 'strict' in tool and type(tool['strict']) is not bool:
+            raise ValueError('Experimental strict must be boolean; validation is local')
         if not isinstance(tool.get('name'), str) or not tool['name'] or len(tool['name']) > 64:
             raise ValueError('Invalid tool name')
         if not isinstance(tool.get('input_schema'), dict) or tool['input_schema'].get('type') != 'object':
