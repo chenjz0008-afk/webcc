@@ -12,6 +12,7 @@ import threading
 import time
 import tomllib
 import uuid
+from api_keys import ApiKeys, KeyProblem
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -208,6 +209,7 @@ class Manager:
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
         self.last_used, self.dispatches = {}, {}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
+        self.api_keys = ApiKeys(self)
         self.image = self.state["update"].get("image", image)
         for account in self.state["accounts"].values():
             account.setdefault("session_imported_at", account.get("created_at", int(time.time())))
@@ -549,7 +551,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
-    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None):
+    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -559,7 +561,7 @@ class Manager:
                 while True:
                     if on_wait:
                         on_wait()
-                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity)]
+                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed)]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
@@ -655,14 +657,21 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.manager
 
     def respond(self, status, data, content_type="application/json; charset=utf-8"):
+        if status >= 400 and isinstance(data, dict):
+            from protocol_errors import applies, wrap
+            if applies(self.path):
+                data = wrap(status, data, self.request_id)
         body = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False).encode()
         try:
             self.send_response(status)
             if self.path.startswith("/admin/"):
                 self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", content_type)
+            if getattr(self, "retry_after", None) is not None:
+                self.send_header("Retry-After", str(self.retry_after))
             if getattr(self, "request_id", None):
                 self.send_header("X-Request-Id", self.request_id)
+                self.send_header("Request-Id", self.request_id)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -677,8 +686,17 @@ class Handler(BaseHTTPRequestHandler):
         if not admin:
             candidate = self.headers.get("x-api-key") or candidate
         expected = self.manager.admin_key if admin else self.manager.api_key
-        if not candidate or not hmac.compare_digest(candidate.encode(), expected.encode()):
-            raise Problem(401, "认证失败")
+        if candidate and hmac.compare_digest(candidate.encode(), expected.encode()):
+            return
+        if not admin and candidate:
+            scope = "models" if self.command == "GET" else "messages"
+            self.caller_key, self.allowed_accounts = self.manager.api_keys.authenticate(candidate, scope, bool(self.headers.get("X-WebCC-Tools")))
+            return
+        raise Problem(401, "认证失败")
+
+    def check_caller(self):
+        if self.caller_key:
+            self.manager.api_keys.check_active(self.caller_key)
 
     def body(self, limit=32 * 1024 * 1024):
         try:
@@ -705,6 +723,8 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def handle_request(self):
+        self.request_id = uuid.uuid4().hex
+        self.caller_key, self.allowed_accounts, self.retry_after = None, None, None
         try:
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
@@ -722,7 +742,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"ok": True})
             elif route.startswith("/admin/"):
                 self.authenticate(admin=True)
-                if route == "/admin/accounts" and self.command == "GET":
+                if route == "/admin/api-keys" and self.command == "GET":
+                    self.respond(200, {"keys": self.manager.api_keys.list()})
+                elif route == "/admin/api-keys" and self.command == "POST":
+                    self.respond(201, self.manager.api_keys.create(json.loads(self.body(16384))))
+                elif re.fullmatch(r"/admin/api-keys/[a-f0-9]{12}/revoke", route) and self.command == "POST":
+                    self.manager.api_keys.revoke(route.split("/")[3])
+                    self.respond(200, {"ok": True})
+                elif route == "/admin/accounts" and self.command == "GET":
                     self.respond(200, self.manager.snapshot())
                 elif route == "/admin/accounts" and self.command == "POST":
                     fields = json.loads(self.body(1024 * 1024))
@@ -753,8 +780,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.forward()
             else:
                 raise Problem(404, "接口不存在")
-        except Problem as error:
+        except (Problem, KeyProblem) as error:
             self.close_connection = True
+            self.retry_after = getattr(error, "retry_after", None)
             self.respond(error.status, {"error": {"message": str(error), "type": "manager_error"}})
         except (ValueError, TypeError, AttributeError):
             self.close_connection = True
@@ -799,7 +827,8 @@ class Handler(BaseHTTPRequestHandler):
                 failure = (504, "请求处理超时")
                 break
             try:
-                account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline)
+                account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline,
+                                               on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts)
             except Problem:
                 if failure is None:
                     raise
@@ -898,10 +927,11 @@ class Handler(BaseHTTPRequestHandler):
                 return 502, "上游流未提供有效内容"
             try:
                 self.send_response(response.status)
-                for key in ("Content-Type", "Retry-After", "Request-Id"):
+                for key in ("Content-Type", "Retry-After"):
                     if response.getheader(key):
                         self.send_header(key, response.getheader(key))
                 self.send_header("X-Request-Id", self.request_id)
+                self.send_header("Request-Id", self.request_id)
                 self.send_header("Transfer-Encoding", "chunked")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")

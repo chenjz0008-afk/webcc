@@ -458,6 +458,7 @@ class ManagerTests(unittest.TestCase):
         self.request("POST", "/v1/chat/completions", self.payload())
         Worker.status_code = 200
         self.assertEqual(self.request("POST", "/v1/chat/completions", self.payload())[0], 200)
+        self.assert_idle()
         self.assertEqual(self.manager.get_account(self.identity)["consecutive_failures"], 0)
 
     def test_stream_error_before_output_switches(self):

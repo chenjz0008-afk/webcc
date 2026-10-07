@@ -3,7 +3,8 @@ import { AppBar, Avatar, Box, Button, Chip, Divider, Drawer, List, ListItemButto
 
 export const modules = [
   ['overview', '工作台', 'OVERVIEW'], ['accounts', '账号管理', 'ACCOUNTS'],
-  ['resources', '资源挂载', 'RESOURCES'], ['updates', '版本更新', 'UPDATES'], ['api', 'API 接入', 'API ACCESS'],
+  ['resources', '资源挂载', 'RESOURCES'], ['updates', '版本更新', 'UPDATES'],
+  ['keys', '调用密钥', 'API KEYS'], ['api', 'API 接入', 'API ACCESS'],
 ];
 const width = 232;
 export default function AdminShell({ page, navigate, refresh, logout, updatedAt, children }) {

@@ -64,3 +64,11 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 依据官方 TypeScript SDK 及 helpers 接口使用 messages.create 和 messages.stream().finalMessage()，实际 npm 版本 0.131.0、Node v24.21.0。用独立模型别名与显式请求头测试近似通道，未伪装成官方 strict 或原生模型身份。Node 运行时经官方 SHA256 校验，npm 禁用安装脚本。候选 HTTPS 保持证书校验，使用临时 CA，并验证不信任 CA 时不会进入模型调用。真实合成 Markdown 文件按逻辑 ID 访问，校验目标编辑和其他字节不变；不把此流程称为 WordBuddy 或 DOCX 验收。
 
 来源：https://github.com/anthropics/anthropic-sdk-typescript ，https://platform.claude.com/docs/en/api/sdks/typescript 。结果见 TYPESCRIPT-SDK.md。
+
+## 2026-10-07 · C01 与 C24
+
+对照 [Claude 错误协议](https://platform.claude.com/docs/en/api/errors) 的状态类型、错误正文和 `request-id`，以及 [LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys) 的独立密钥、资源权限和速率控制。TypeScript SDK 固定 0.131.0；实际异常请求 ID 使用 `requestID`，流助手使用 `request_id`，通过真实 SDK 验证，避免依赖猜测的属性名。
+
+当前两核、约 2 GB 的服务器沿用现有网关，不新增 LiteLLM 服务或 PostgreSQL。独立密钥保存随机值的摘要，账号范围直接传给现有选号器，失败切换同样受范围约束。权限集中在鉴权入口，排队请求在获取资源前复核撤销与到期；已开始的请求允许完成。速率窗口使用加锁的单进程内存队列，重启会重置，不宣称提供分布式计费或官方 workspace 管理能力。
+
+验收包括：两名调用者不能跨账号范围、失败切换不能越界、管理接口不能被调用密钥访问、限速原子性、重启后撤销持久化、排队撤销、SDK 六轮真实文件工具流程及 TLS 校验。Files 等未来资源接口的所有权隔离须在该接口实现时继续验收。方案及证据见 [调用密钥](CALLER-KEYS.md)。

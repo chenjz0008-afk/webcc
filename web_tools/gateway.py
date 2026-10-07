@@ -44,10 +44,15 @@ def forward(handler):
         error(problem.status, 'invalid_request_error', str(problem))
         return
     attempted, last = set(), (503, 'overloaded_error', 'No experimental account available')
+    def waiting():
+        if not attempted:
+            handler.check_caller()
+        alive()
     for _ in range(handler.manager.retry_attempts):
         alive()
         try:
-            account = handler.manager.acquire(exclude=attempted, request_deadline=handler.request_deadline, on_wait=alive)
+            account = handler.manager.acquire(exclude=attempted, request_deadline=handler.request_deadline,
+                                               on_wait=waiting, allowed=handler.allowed_accounts)
         except Problem as problem:
             if not attempted:
                 last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error', 'No experimental account available')
@@ -93,7 +98,8 @@ def forward(handler):
                 handler.send_response(200)
                 for key, value in [('Content-Type', 'text/event-stream'), ('Transfer-Encoding', 'chunked'),
                     ('Cache-Control', 'no-store'), ('X-Accel-Buffering', 'no'),
-                    ('X-Request-Id', handler.request_id), ('X-WebCC-Adapter', 'prompt-v1; buffered')]:
+                    ('X-Request-Id', handler.request_id), ('Request-Id', handler.request_id),
+                    ('X-WebCC-Adapter', 'prompt-v1; buffered')]:
                     handler.send_header(key, value)
                 handler.end_headers()
                 sent = True

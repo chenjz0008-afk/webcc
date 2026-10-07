@@ -10,7 +10,7 @@ command -v python3 >/dev/null
 project_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 install -d -m 0755 /opt/clewdr-manager
 if [ "$project_dir" != /opt/clewdr-manager ]; then
-  cp "$project_dir"/manager.py "$project_dir"/updater.py "$project_dir"/serve.py "$project_dir"/egress.py /opt/clewdr-manager/
+  cp "$project_dir"/manager.py "$project_dir"/updater.py "$project_dir"/serve.py "$project_dir"/egress.py "$project_dir"/protocol_errors.py "$project_dir"/api_keys.py /opt/clewdr-manager/
   cp -R "$project_dir"/web_tools /opt/clewdr-manager/
   cp -R "$project_dir"/static /opt/clewdr-manager/
 fi
