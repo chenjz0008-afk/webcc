@@ -1,3 +1,7 @@
+## 2026-10-07 · 生产发布 33aa3be
+
+按用户授权发布主网关与重新构建的 MUI 前端，开启显式网页工具策略；保留服务器私有备份。公网 HTTPS 工具提议、结果回传及 PDF 读取全部通过，测试密钥已撤销。原版 ClewdR 与账号配置保持原样。详见 [发布记录](docs/PRODUCTION-RELEASE.md)。
+
 ## 2026-10-07 · 网页工具选择、本地 strict 与 PDF 输入
 
 候选版本，官方 ClewdR 未修改，未部署生产。工具策略接受 strict 布尔字段并以 no-native-strict 标记本地 JSON Schema 校验；普通 Messages 的内联 PDF document 块映射到 ClewdR 现有上传路径，保留文件字节和文本元数据。不支持的 PDF 来源、原生引用及扩展在选号前明确返回 400。

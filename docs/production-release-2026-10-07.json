@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-07",
+  "implementation_commit": "33aa3beb63dd1b0d3e6cc401ecf2bc6ed099bd5d",
+  "deployed": true,
+  "frontend_build": true,
+  "account_ids_preserved": true,
+  "backup_created": true,
+  "public_https": {
+    "frontend": true,
+    "health": true,
+    "tool_request": {
+      "status": 200,
+      "pass": true,
+      "adapter": "prompt-v1; schema-validated; no-native-strict; buffered",
+      "request_id_present": true
+    },
+    "tool_result": {
+      "status": 200,
+      "pass": true,
+      "text": "37"
+    },
+    "pdf": {
+      "status": 200,
+      "pass": true,
+      "output": {
+        "north": 37,
+        "south": 83,
+        "sum": 120,
+        "references": [
+          "ALLOCATION-001",
+          "ALLOCATION-002"
+        ]
+      }
+    },
+    "test_key_revoked": true,
+    "pass": true
+  }
+}
