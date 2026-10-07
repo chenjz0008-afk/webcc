@@ -37,3 +37,13 @@ python3 -m experiments.server_typescript --document-review --account=ccb9
 ```
 
 需服务器测试副本包含项目源码及 experiments 下的 SDK、渲染脚本。命令下载已校验的 Node 归档、安装固定测试依赖，复制账号配置，运行临时容器后清理。既有代理白名单网络必须存在；同名测试容器存在时直接停止，不覆盖生产容器。报告保存在服务器私有数据目录。
+
+## WorkBuddy 接入协议探测
+
+根据 [WorkBuddy 官方模型配置](https://www.codebuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model) 与 [腾讯云接入说明](https://cloud.tencent.com/document/product/1829/135988)，自定义模型可连接 `/v1/chat/completions`。这与候选网页工具实验的 `/v1/messages`、专用请求头和模型别名入口不同。
+
+仅在服务器临时候选环境做一次真实探测：按 OpenAI 格式声明 read_document 工具并要求读取 B。返回 HTTP 200、finish_reason=stop，但没有 tool_calls；模型文字明确表示没有该工具。调用槽位释放，生产 registry 不变，临时资源清理。没有执行 WorkBuddy 桌面应用，所以本次是接入必要协议条件检查，不是实际应用端到端验收。
+
+结论：普通文本响应可返回，但本次文档工具必要条件未通过。之前 Claude SDK 的实验流程通过不能证明 WorkBuddy 自定义模型 Agent 可直接使用。按本轮只测试的要求，没有加入 OpenAI 工具转换层，没有修改主网关或官方 ClewdR。完整 WorkBuddy 工具接入继续列为待办。
+
+[探测记录](workbuddy-protocol-probe-2026-10-07.json)。该探测程序仅存在于服务器临时环境，测试后清理，不作为生产功能代码加入仓库。
