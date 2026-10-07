@@ -667,6 +667,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path.startswith("/admin/"):
                 self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", content_type)
+            if getattr(self, "adapter", None):
+                self.send_header("X-WebCC-Adapter", self.adapter)
             if getattr(self, "retry_after", None) is not None:
                 self.send_header("Retry-After", str(self.retry_after))
             if getattr(self, "request_id", None):
@@ -724,7 +726,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         self.request_id = uuid.uuid4().hex
-        self.caller_key, self.allowed_accounts, self.retry_after = None, None, None
+        self.caller_key, self.allowed_accounts, self.retry_after, self.adapter = None, None, None, None
         try:
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
@@ -814,6 +816,13 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, RecursionError):
                 payload = None
             reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
+            if urlsplit(self.path).path == '/v1/messages':
+                from web_documents import prepare, DocumentProblem
+                try:
+                    if prepare(payload):
+                        body = json.dumps(payload, ensure_ascii=False).encode()
+                except DocumentProblem as error:
+                    raise Problem(400, str(error)) from None
             del payload
             if reserved_model:
                 self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "prompt-v1 requires X-WebCC-Tools"}})

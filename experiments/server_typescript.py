@@ -25,6 +25,8 @@ def main():
     registry = Path('/var/lib/clewdr-manager/registry.json')
     initial = registry.read_bytes()
     document_review = '--document-review' in sys.argv
+    basic_capabilities = '--basic-capabilities' in sys.argv
+    skip_ui = document_review or basic_capabilities
     name = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--account=')), 'cc1')
     account = next(a for a in json.loads(initial)['accounts'].values() if a['name'] == name and a['status'] == 'ready')
     worker = 'webcc-ts-proof'
@@ -58,8 +60,8 @@ def main():
             sdk = root / 'sdk'; sdk.mkdir()
             run([str(node), str(npm), 'install', '--prefix', str(sdk), '--ignore-scripts', '--no-audit', '--no-fund', '@anthropic-ai/sdk@0.131.0'] + (['markdown-it@14.1.0'] if document_review else []), env=env)
             source = Path(__file__).parent
-            report['frontend_build'] = {'pass': True, 'skipped': document_review}
-            if not document_review:
+            report['frontend_build'] = {'pass': True, 'skipped': skip_ui}
+            if not skip_ui:
                 ui = root / 'frontend'; shutil.copytree(source.parent / 'frontend', ui)
                 run([str(node), str(npm), 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], cwd=ui, env=env)
                 build = run([str(node), str(npm), 'run', 'build'], cwd=ui, env=env)
@@ -70,6 +72,8 @@ def main():
                 print(json.dumps(report, ensure_ascii=False), flush=True)
                 return
             script = sdk / 'sdk_request.mjs'; shutil.copy2(source / 'sdk_request.mjs', script)
+            if basic_capabilities:
+                shutil.copytree(source / 'fixtures', sdk / 'fixtures')
             if document_review:
                 shutil.copy2(source / 'render_markdown.mjs', sdk / 'render_markdown.mjs')
             config = root / 'config'; config.mkdir(mode=0o700)
@@ -98,14 +102,14 @@ def main():
                  '-out', str(cert), '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'])
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); context.load_cert_chain(cert, private)
             from experiments.typescript_cases import run_typescript_case
-            report['sdk'] = run_typescript_case(account, node, script, True, context, cert, not document_review, True, document_review)
+            report['sdk'] = run_typescript_case(account, node, script, True, context, cert, not skip_ui, True, document_review, basic_capabilities)
             report['pass'] = report['sdk']['pass'] and report['frontend_build']['pass']
         finally:
             run(['docker', 'rm', '-f', worker], check=False)
             report['production_registry_unchanged'] = registry.read_bytes() == initial
             report['temporary_container_removed'] = run(['docker', 'inspect', worker], check=False).returncode != 0
     report['temporary_directory_removed'] = not root.exists()
-    output = Path('/var/lib/clewdr-manager') / (f'document-review-{name}.json' if document_review else 'scoped-sdk-verification.json')
+    output = Path('/var/lib/clewdr-manager') / (f'basic-capabilities-{name}.json' if basic_capabilities else f'document-review-{name}.json' if document_review else 'scoped-sdk-verification.json')
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2)); os.chmod(output, 0o600)
     print(json.dumps(report, ensure_ascii=False), flush=True)
 

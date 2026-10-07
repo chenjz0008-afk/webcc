@@ -1,3 +1,9 @@
+## 2026-10-07 · 网页工具选择、本地 strict 与 PDF 输入
+
+候选版本，官方 ClewdR 未修改，未部署生产。工具策略接受 strict 布尔字段并以 no-native-strict 标记本地 JSON Schema 校验；普通 Messages 的内联 PDF document 块映射到 ClewdR 现有上传路径，保留文件字节和文本元数据。不支持的 PDF 来源、原生引用及扩展在选号前明确返回 400。
+
+服务器 142 项回归通过（77.280 秒）；ccb9 的 11 次真实模型请求通过，覆盖七种选择、本地 strict、PNG、标准和旧格式 PDF。修改前 cc1 标准 PDF 失败记录保留。两页数据与引用标记准确；槽位、密钥隔离和撤销、HTTPS 校验通过，账号库不变、临时资源清理。原生 strict、签名、Files、缓存及服务端工具仍未完成。详见 [网页能力与验收](docs/WEB-ACCOUNT-CAPABILITIES.md)。
+
 ## 2026-10-07 · WorkBuddy 必要协议探测
 
 仅测试并更新报告，没有新增生产功能。对照 WorkBuddy 与腾讯云官方配置，使用服务器隔离候选网关按 OpenAI 格式声明读取工具。一次真实请求返回 200，但缺少 tool_calls，模型明确表示没有声明的工具。普通聊天成功不能证明 WorkBuddy 文档 Agent 可用；保留实际应用兼容待办。生产 registry 不变、资源释放、临时容器清理，未在本机运行 WorkBuddy 或 Claude。详见 [探测记录](docs/workbuddy-protocol-probe-2026-10-07.json)。

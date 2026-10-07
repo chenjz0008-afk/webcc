@@ -1,0 +1,137 @@
+{
+  "file": "basic-capabilities-ccb9.json",
+  "data": {
+    "date": "2026-10-07",
+    "account": "ccb9",
+    "candidate_only": true,
+    "frontend_build": {
+      "pass": true,
+      "skipped": true
+    },
+    "sdk": {
+      "media": [
+        {
+          "name": "image",
+          "pass": true,
+          "status": 200,
+          "output": {
+            "colors": [
+              "red",
+              "blue",
+              "green"
+            ]
+          },
+          "text_preview": "{\"colors\":[\"red\",\"blue\",\"green\"]}"
+        },
+        {
+          "name": "native_pdf",
+          "pass": true,
+          "status": 200,
+          "output": {
+            "north": 37,
+            "south": 83,
+            "sum": 120,
+            "references": [
+              "ALLOCATION-001",
+              "ALLOCATION-002"
+            ]
+          },
+          "text_preview": "{\"north\":37,\"south\":83,\"sum\":120,\"references\":[\"ALLOCATION-001\",\"ALLOCATION-002\"]}"
+        },
+        {
+          "name": "legacy_pdf",
+          "pass": true,
+          "status": 200,
+          "output": {
+            "north": 37,
+            "south": 83,
+            "sum": 120,
+            "references": [
+              "ALLOCATION-001",
+              "ALLOCATION-002"
+            ]
+          },
+          "text_preview": "{\"north\":37,\"south\":83,\"sum\":120,\"references\":[\"ALLOCATION-001\",\"ALLOCATION-002\"]}"
+        }
+      ],
+      "pass": true,
+      "local_strict_accepted": true,
+      "native_strict_provided": false,
+      "bad_id_rejected": true,
+      "bad_id_not_dispatched": true,
+      "slots_released": true,
+      "revoked_key_rejected": true,
+      "revocation_no_dispatch": true,
+      "scoped_account_dispatches_only": true,
+      "sdk_streamed": true,
+      "sdk_request_ids_present": true,
+      "verified_https": true,
+      "untrusted_certificate_rejected_before_dispatch": true
+    },
+    "pass": true,
+    "production_registry_unchanged": true,
+    "temporary_container_removed": true,
+    "temporary_directory_removed": true
+  },
+  "choices": [
+    {
+      "name": "none",
+      "pass": true,
+      "status": 200,
+      "calls": []
+    },
+    {
+      "name": "auto_text",
+      "pass": true,
+      "status": 200,
+      "calls": []
+    },
+    {
+      "name": "auto_tool",
+      "pass": true,
+      "status": 200,
+      "calls": [
+        "read_doc"
+      ]
+    },
+    {
+      "name": "any",
+      "pass": true,
+      "status": 200,
+      "calls": [
+        "read_doc"
+      ]
+    },
+    {
+      "name": "selected",
+      "pass": true,
+      "status": 200,
+      "calls": [
+        "lookup_doc"
+      ]
+    },
+    {
+      "name": "single",
+      "pass": true,
+      "status": 200,
+      "calls": [
+        "read_doc"
+      ]
+    },
+    {
+      "name": "parallel",
+      "pass": true,
+      "status": 200,
+      "calls": [
+        "read_doc",
+        "lookup_doc"
+      ]
+    }
+  ],
+  "regression": {
+    "tests": 142,
+    "seconds": 77.28,
+    "pass": true
+  },
+  "real_model_requests": 11
+}

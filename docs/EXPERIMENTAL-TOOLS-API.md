@@ -19,13 +19,17 @@
 | 请求头 | X-WebCC-Tools: prompt-v1 |
 | model | webcc-prompt-v1 |
 | max_tokens | 16—8192 |
-| tools | 1—64 个客户端工具，name、description、input_schema |
+| tools | 1—64 个客户端工具，name、description、input_schema，可选 strict 布尔值 |
 | messages | 交替的 user/assistant，支持文本、tool_use、文本 tool_result |
 | system | 可选文本 |
 | stream | true 或 false |
 | tool_choice | auto、none、any、tool，可带 disable_parallel_tool_use |
 
-显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking、strict、图像、文档块和额外参数在该模式下明确拒绝。普通模式不进入此适配器。
+显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking、图像、文档块和额外参数在该模式下明确拒绝。普通模式不进入此适配器。
+
+## 参数校验
+
+strict 仅接受布尔值。该实验策略对所有工具返回参数进行本地 JSON Schema 校验；不合规结果返回错误，不交给客户端执行。strict=true 不启用官方约束采样，也不保证模型第一次生成一定成功。JSON 和 SSE 响应以 X-WebCC-Adapter: prompt-v1; schema-validated; no-native-strict; buffered 标明实际策略。
 
 ## Python SDK
 

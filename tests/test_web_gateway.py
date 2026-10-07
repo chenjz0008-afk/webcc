@@ -73,7 +73,7 @@ class WebGatewayTests(unittest.TestCase):
 
     def test_invalid_request_no_account_failure(self):
         for fields in [{'thinking': {'type': 'enabled'}}, {'model': 'claude-sonnet-4-6'},
-                       {'tools': [{'name': 'read', 'strict': True, 'input_schema': {'type': 'object'}}]},
+                       {'tools': [{'name': 'read', 'strict': 'true', 'input_schema': {'type': 'object'}}]},
                        {'messages': [{'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'foreign'}]}]}]:
             self.assertEqual(self.web({**self.payload_web(), **fields})[0], 400)
         self.assertFalse(Worker.seen)
@@ -188,4 +188,16 @@ class WebGatewayTests(unittest.TestCase):
             self.assertFalse(Worker.seen)
         finally:
             connection.close();self.manager.release(held)
+        self.assert_idle()
+
+    def test_strict_flag_is_explicit_local_validation(self):
+        payload = self.payload_web();payload['tools'] = [{**TOOLS[0], 'strict': True}]
+        status, headers, raw = self.web(payload)
+        self.assertEqual(status, 200)
+        self.assertIn('no-native-strict', headers['X-WebCC-Adapter'])
+        self.assertEqual(json.loads(raw)['content'][0]['input'], {'id': 'A'})
+        account = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + account['key']] = (200, raw_output({'calls': [{'name': 'read', 'input': {'id': 'outside'}}], 'text': ''}))
+        self.assertEqual(self.web(payload)[0], 502)
+        self.assertEqual(account['status'], 'ready')
         self.assert_idle()

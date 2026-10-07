@@ -80,3 +80,9 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 新增相近的标准与优先审阅段落，段落 ID、原文及行号来自实际文件。局部修改只允许 B-P2 的留存天数改变，并回读检查；A、其他段落、表格、列表及引用链接保持。测试执行器拒绝 MISSING 与 PRIVATE，验证模型正确披露不存在和拒绝读取，不代替真实应用权限系统验收。
 
 格式检查复用 [markdown-it 14.1.0](https://github.com/markdown-it/markdown-it/releases/tag/14.1.0)，比较解析结构、链接属性和期望 HTML；不编写新 Markdown 解析器，不把 HTML 结构检查称为 DOCX 或视觉排版验收。依赖仅存在于服务器临时测试环境，不加入生产服务。
+
+## C08 / C09 / C15 · 网页范围复核（2026-10-07）
+
+参照 [官方 strict](https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)、[PDF](https://platform.claude.com/docs/en/build-with-claude/pdf-support) 和 [ClewdR 固定转换实现](https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/claude_web_state/transform.rs)。沿用已调研的 LiteLLM 提示适配思路和 jsonschema，不引入第二套网关。官方约束采样无法由本地参数校验替代，响应显式标记 no-native-strict。
+
+修改前 cc1 七种工具选择通过；PNG 与已有 PDF 上传路径通过，但标准 document 输入被忽略。最小修复是在主项目转换输入，不改 ClewdR。非法编码、URL/file_id、原生引用和扩展在选号前拒绝，失败不计入账号异常；同份合成 PDF 在修改后的独立账号路径复验。完整范围及后续依赖见 [网页能力说明](WEB-ACCOUNT-CAPABILITIES.md)。
