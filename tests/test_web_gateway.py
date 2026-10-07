@@ -35,6 +35,22 @@ class WebGatewayTests(unittest.TestCase):
     def web(self, body=None):
         return self.request('POST', '/v1/messages', body or self.payload_web(), extra={'X-WebCC-Tools': 'prompt-v1'})
 
+    def test_media_admission_rejected_before_dispatch(self):
+        body=self.payload_web();body['messages'][0]['content']=[{'type':'document','source':{'type':'text','data':'fixture'}}]
+        with patch('web_tools.gateway.MEDIA_SLOTS') as slots:
+            slots.acquire.return_value=False
+            self.assertEqual(self.web(body)[0],429)
+            slots.release.assert_not_called()
+        self.assertFalse(Worker.seen);self.assert_idle()
+
+    def test_media_admission_released_after_validation_failure(self):
+        body=self.payload_web();body['messages'][0]['content']=[{'type':'image','source':{'type':'url','url':'http://127.0.0.1'}}]
+        with patch('web_tools.gateway.MEDIA_SLOTS') as slots:
+            slots.acquire.return_value=True
+            self.assertEqual(self.web(body)[0],400)
+            slots.release.assert_called_once()
+        self.assertFalse(Worker.seen);self.assert_idle()
+
     def test_opt_in_and_usage(self):
         status, headers, data = self.web()
         self.assertEqual(status, 200)

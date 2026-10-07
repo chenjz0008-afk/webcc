@@ -9,9 +9,30 @@ import uuid
 from manager import ClientGone, Problem
 from jsonschema.exceptions import ValidationError, SchemaError, RefResolutionError
 from web_tools.api import complete, events, prepare
+from web_files import FileProblem
+
+
+MEDIA_SLOTS = threading.BoundedSemaphore(2)
 
 
 def forward(handler):
+    admitted = False
+
+    def admit():
+        nonlocal admitted
+        if not admitted:
+            if not MEDIA_SLOTS.acquire(blocking=False):
+                raise FileProblem(429, 'Media tool requests are busy; retry later')
+            admitted = True
+
+    try:
+        _forward(handler, admit)
+    finally:
+        if admitted:
+            MEDIA_SLOTS.release()
+
+
+def _forward(handler, admit):
     handler.adapter = 'prompt-v1; schema-validated; no-native-strict; buffered'
     handler.request_id = uuid.uuid4().hex
     handler.request_deadline = time.monotonic() + handler.manager.request_seconds
@@ -35,7 +56,13 @@ def forward(handler):
     try:
         if handler.headers.get('anthropic-beta') or handler.path != '/v1/messages':
             raise ValueError('Beta and query parameters are unsupported in prompt-v1')
-        request, body = prepare(handler.body(131072))
+        if int(handler.headers.get('Content-Length', '0')) > 131072:
+            admit()
+        request, body = prepare(handler.body(32 * 1024 * 1024), handler.manager.files, handler.caller_key or 'platform', on_media=admit)
+    except FileProblem as problem:
+        handler.close_connection = True
+        error(problem.status, 'invalid_request_error', str(problem))
+        return
     except (ValueError, TypeError, KeyError, RecursionError, ValidationError, SchemaError, RefResolutionError):
         handler.close_connection = True
         error(400, 'invalid_request_error', 'Unsupported or invalid prompt-v1 request')

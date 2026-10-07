@@ -2,12 +2,13 @@
 import json
 from uuid import uuid4
 from web_tools import build_prompt, parse_response
+from web_tools.media import MAX_REQUEST, separate
 from web_tools.history import bounded_json
 
 MODEL = 'webcc-prompt-v1'
 
 
-def prepare(raw):
+def prepare(raw, files=None, owner=None, on_media=None):
     def unique(pairs):
         obj = {}
         for name, value in pairs:
@@ -16,6 +17,20 @@ def prepare(raw):
             obj[name] = value
         return obj
     data = json.loads(raw, object_pairs_hook=unique)
+    if not isinstance(data, dict) or not isinstance(data.get('messages'), list) or any(not isinstance(m, dict) for m in data['messages']):
+        raise ValueError('Invalid message structure')
+    for message in data['messages']:
+        content = message.get('content')
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            blocks = block.get('content', []) if isinstance(block, dict) and block.get('type') == 'tool_result' else [block]
+            if isinstance(blocks, list) and any(isinstance(b, dict) and b.get('type') in ('image', 'document') for b in blocks):
+                if on_media is not None:
+                    on_media()
+    if files is not None:
+        data, _ = files.resolve(owner, data)
+    data, attachments = separate(data)
     bounded_json(data)
     if not isinstance(data, dict) or set(data) - {'model', 'max_tokens', 'messages', 'tools', 'tool_choice', 'stream', 'system'}:
         raise ValueError('Unsupported experimental request fields')
@@ -32,10 +47,14 @@ def prepare(raw):
     # Bound the full prompt, including system and protocol instructions.
     bounded_json({'system': system, 'prompt': prompt})
     upstream = {'model': 'claude-sonnet-4-6', 'max_tokens': data['max_tokens'], 'stream': False,
-                'messages': [{'role': 'user', 'content': prompt}]}
+                'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': prompt}, *attachments] if attachments else prompt}]}
     if system:
         upstream['system'] = system
-    return data, json.dumps(upstream, ensure_ascii=False).encode()
+    body = json.dumps(upstream, ensure_ascii=False).encode()
+    if len(body) > MAX_REQUEST:
+        from web_files import FileProblem
+        raise FileProblem(413, 'Expanded tool request exceeds 32 MiB')
+    return data, body
 
 
 def complete(raw, request):
