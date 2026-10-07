@@ -12,6 +12,7 @@ import threading
 import time
 import tomllib
 import uuid
+from api_keys import ApiKeys, KeyProblem
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -195,6 +196,9 @@ class Manager:
         self.path = self.data / "registry.json"
         self.image, self.api_key, self.admin_key = image, api_key, admin_key
         self.max_inflight, self.queue_size, self.queue_seconds = max_inflight, queue_size, queue_seconds
+        self.web_tools_enabled = os.environ.get("MANAGER_WEB_TOOLS_ENABLED", "false").lower() == "true"
+        if self.web_tools_enabled:
+            import web_tools.api
         self.retry_attempts = max(1, min(5, int(os.environ.get("MANAGER_RETRY_ATTEMPTS", "3"))))
         self.failure_threshold = max(2, int(os.environ.get("MANAGER_FAILURE_THRESHOLD", "3")))
         self.request_seconds = max(10, float(os.environ.get("MANAGER_REQUEST_SECONDS", "150")))
@@ -205,6 +209,7 @@ class Manager:
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
         self.last_used, self.dispatches = {}, {}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
+        self.api_keys = ApiKeys(self)
         self.image = self.state["update"].get("image", image)
         for account in self.state["accounts"].values():
             account.setdefault("session_imported_at", account.get("created_at", int(time.time())))
@@ -284,13 +289,33 @@ class Manager:
             return listener.getsockname()[1]
 
     def run_worker(self, account, image=None, directory=None, port=None, name=None):
+        network = self.worker_network(account, directory)
         self.docker("run", "-d", "--name", name or account["container"], "--restart", "unless-stopped",
+                    *network,
                     "--label", "clewdr-manager=true", "--label", "account-id=" + account["id"],
                     "--publish", "127.0.0.1:{}:8484".format(port or account["port"]),
                     "--mount", "type=bind,src={},dst=/etc/clewdr".format(directory or account["directory"]),
                     "--log-driver", "none", "--read-only", "--tmpfs", "/tmp:rw,nosuid,noexec,size=16m",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "0:0",
                     "--memory", "256m", "--pids-limit", "64", "--cpus", "1", image or account["image"])
+
+    def worker_network(self, account, directory=None):
+        if os.environ.get("MANAGER_PROXY_ONLY", "false").lower() != "true":
+            return []
+        import egress
+        path = Path(directory or account["directory"]) / "clewdr.toml"
+        text = path.read_text()
+        config = tomllib.loads(text)
+        try:
+            proxy = config["proxy"]
+            if proxy.startswith("socks5://"):
+                proxy = "socks5h://" + proxy[len("socks5://"):]
+            network = egress.prepare(self.data, account["id"], proxy)
+            if proxy != config["proxy"]:
+                private_write(path, re.sub(r"(?m)^proxy\s*=.*$", lambda _: "proxy = " + json.dumps(proxy), text))
+            return network
+        except egress.EgressError:
+            raise Problem(503, "出口白名单未能就绪，拒绝启动账号容器") from None
 
     def wait_ready(self, port):
         for _ in range(40):
@@ -514,6 +539,11 @@ class Manager:
                 elif self.inspect(account["container"])["status"] == "missing":
                     self.run_worker(account)
                 else:
+                    network = self.worker_network(account)
+                    if network:
+                        existing = json.loads(self.docker("inspect", account["container"]))[0]
+                        if existing["HostConfig"]["NetworkMode"] != network[1]:
+                            raise Problem(503, "旧容器尚未迁移至代理专用网络，拒绝启动")
                     self.docker("start", account["container"])
                 account["version"] = self.wait_ready(account["port"])
                 account.update(consecutive_failures=0, cooldown_until=0)
@@ -521,7 +551,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
-    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None):
+    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -529,7 +559,9 @@ class Manager:
             self.waiting += 1
             try:
                 while True:
-                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity)]
+                    if on_wait:
+                        on_wait()
+                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed)]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
@@ -544,7 +576,7 @@ class Manager:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise Problem(429, "等待可用账号超时")
-                    self.condition.wait(remaining)
+                    self.condition.wait(min(remaining, .2) if on_wait else remaining)
             finally:
                 self.waiting -= 1
 
@@ -625,14 +657,21 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.manager
 
     def respond(self, status, data, content_type="application/json; charset=utf-8"):
+        if status >= 400 and isinstance(data, dict):
+            from protocol_errors import applies, wrap
+            if applies(self.path):
+                data = wrap(status, data, self.request_id)
         body = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False).encode()
         try:
             self.send_response(status)
             if self.path.startswith("/admin/"):
                 self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", content_type)
+            if getattr(self, "retry_after", None) is not None:
+                self.send_header("Retry-After", str(self.retry_after))
             if getattr(self, "request_id", None):
                 self.send_header("X-Request-Id", self.request_id)
+                self.send_header("Request-Id", self.request_id)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -647,8 +686,17 @@ class Handler(BaseHTTPRequestHandler):
         if not admin:
             candidate = self.headers.get("x-api-key") or candidate
         expected = self.manager.admin_key if admin else self.manager.api_key
-        if not candidate or not hmac.compare_digest(candidate.encode(), expected.encode()):
-            raise Problem(401, "认证失败")
+        if candidate and hmac.compare_digest(candidate.encode(), expected.encode()):
+            return
+        if not admin and candidate:
+            scope = "models" if self.command == "GET" else "messages"
+            self.caller_key, self.allowed_accounts = self.manager.api_keys.authenticate(candidate, scope, bool(self.headers.get("X-WebCC-Tools")))
+            return
+        raise Problem(401, "认证失败")
+
+    def check_caller(self):
+        if self.caller_key:
+            self.manager.api_keys.check_active(self.caller_key)
 
     def body(self, limit=32 * 1024 * 1024):
         try:
@@ -675,6 +723,8 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def handle_request(self):
+        self.request_id = uuid.uuid4().hex
+        self.caller_key, self.allowed_accounts, self.retry_after = None, None, None
         try:
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
@@ -692,7 +742,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"ok": True})
             elif route.startswith("/admin/"):
                 self.authenticate(admin=True)
-                if route == "/admin/accounts" and self.command == "GET":
+                if route == "/admin/api-keys" and self.command == "GET":
+                    self.respond(200, {"keys": self.manager.api_keys.list()})
+                elif route == "/admin/api-keys" and self.command == "POST":
+                    self.respond(201, self.manager.api_keys.create(json.loads(self.body(16384))))
+                elif re.fullmatch(r"/admin/api-keys/[a-f0-9]{12}/revoke", route) and self.command == "POST":
+                    self.manager.api_keys.revoke(route.split("/")[3])
+                    self.respond(200, {"ok": True})
+                elif route == "/admin/accounts" and self.command == "GET":
                     self.respond(200, self.manager.snapshot())
                 elif route == "/admin/accounts" and self.command == "POST":
                     fields = json.loads(self.body(1024 * 1024))
@@ -723,8 +780,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.forward()
             else:
                 raise Problem(404, "接口不存在")
-        except Problem as error:
+        except (Problem, KeyProblem) as error:
             self.close_connection = True
+            self.retry_after = getattr(error, "retry_after", None)
             self.respond(error.status, {"error": {"message": str(error), "type": "manager_error"}})
         except (ValueError, TypeError, AttributeError):
             self.close_connection = True
@@ -740,7 +798,26 @@ class Handler(BaseHTTPRequestHandler):
         self.manager.check_upstream(os.environ.get("MANAGER_FOLLOW", "master"), True)
 
     def forward(self):
+        mode = self.headers.get("X-WebCC-Tools")
+        if mode:
+            if mode != "prompt-v1" or not self.manager.web_tools_enabled or self.command != "POST" or urlsplit(self.path).path != "/v1/messages":
+                self.close_connection = True
+                self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "Experimental tools are disabled or unsupported"}})
+                return
+            from web_tools.gateway import forward
+            forward(self)
+            return
         body = self.body() if self.command == "POST" else None
+        if body:
+            try:
+                payload = json.loads(body)
+            except (ValueError, RecursionError):
+                payload = None
+            reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
+            del payload
+            if reserved_model:
+                self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "prompt-v1 requires X-WebCC-Tools"}})
+                return
         self.request_id = uuid.uuid4().hex
         self.request_deadline = time.monotonic() + self.manager.request_seconds
         attempted = set()
@@ -750,7 +827,8 @@ class Handler(BaseHTTPRequestHandler):
                 failure = (504, "请求处理超时")
                 break
             try:
-                account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline)
+                account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline,
+                                               on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts)
             except Problem:
                 if failure is None:
                     raise
@@ -849,10 +927,11 @@ class Handler(BaseHTTPRequestHandler):
                 return 502, "上游流未提供有效内容"
             try:
                 self.send_response(response.status)
-                for key in ("Content-Type", "Retry-After", "Request-Id"):
+                for key in ("Content-Type", "Retry-After"):
                     if response.getheader(key):
                         self.send_header(key, response.getheader(key))
                 self.send_header("X-Request-Id", self.request_id)
+                self.send_header("Request-Id", self.request_id)
                 self.send_header("Transfer-Encoding", "chunked")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")

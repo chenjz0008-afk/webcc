@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-07",
+  "candidate_only": true,
+  "account": "cc1",
+  "protocol": "OpenAI Chat Completions",
+  "actual_workbuddy_application": false,
+  "http_status": 200,
+  "standard_tool_calls": false,
+  "tool_names": [],
+  "finish_reason": "stop",
+  "text_preview": "I don't have a `read_document` tool in this conversation, so I can't retrieve document B. The only tools available to me here are for things like file handling, publishing artifacts, and searching connectors, and none of them fetch a document by ID.\n\nThe uploaded file (`paste.txt`) contains only the instruction itself: \"Read document B by calling read_document with id B. Do not invent its contents. First return the tool call.\" There's no actual content from a document B in it, and I won't make any up.\n\nIf document B lives somewhere I can reach, there are a few ways forward:\n\n- **Upload it dire",
+  "response_model": "",
+  "error_type": null,
+  "necessary_tool_protocol_pass": false,
+  "slots_released": true,
+  "production_registry_unchanged": true,
+  "temporary_container_removed": true,
+  "temporary_directory_removed": true
+}

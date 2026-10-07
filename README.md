@@ -26,6 +26,7 @@ flowchart TD
 | 部分 | 职责 |
 | --- | --- |
 | `manager.py` | 账号和凭据、代理检查、容器启停、平台认证、并发、请求转发和异常处理 |
+| `egress.py` | 账号容器代理出口白名单与启动前防火墙恢复 |
 | `updater.py` | 检查 ClewdR 官方版本、候选容器验证、逐个更新和失败回退 |
 | `frontend/src/pages/` | 工作台、账号、资源、更新和 API 接入页面 |
 | `frontend/src/components/` | 后台布局、账号表单、详情抽屉、凭据字段和复制组件 |
@@ -64,6 +65,8 @@ flowchart TD
 ## 已实现的功能
 
 账号页面采用表格和右侧抽屉，可以录入、导入和修改账号资料。抽屉提供代理连接串、邮箱凭据、sessionKey、UA、系统标签和容器详情，各项支持复制。敏感字段默认遮挡。
+
+生产已启用账号出口白名单，代理故障不允许直连；新增账号要求固定公网 IPv4 代理。配置、迁移与验收见 [出口保护](docs/EGRESS.md)。
 
 创建账号前会检测代理出口 IP 和 HTTPS 耗时。账号独立使用配置目录和代理。UA 与系统标签目前用于资料展示，没有替换 ClewdR 内置的请求指纹。
 
@@ -138,3 +141,9 @@ sudo bash deploy/install.sh
 当前运行版本在 Git 中保存为 `server-baseline-2026-10-06` 标签，后续兼容开发使用 `feat/claude-api-compatibility` 分支。小提交分别完成修改和测试，通过后再考虑发布；分支推送不会自动部署服务器。
 
 源码回滚使用 Git，账号资料和运行状态使用服务器私有备份。代码回滚不能恢复 Cookie，也不能撤销已经执行的上游请求。具体步骤见 [开发与回滚](docs/DEVELOPMENT.md)，日常操作见 [运维说明](OPERATIONS.md)。
+
+## 网页工具实验策略
+
+候选代码提供默认关闭的 prompt-v1 实验策略，独立于官方 ClewdR。共享逻辑在 web_tools，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。实际模型身份、官方 strict 和 thinking 签名不属于本模式。
+
+[实验接口](docs/EXPERIMENTAL-TOOLS-API.md)说明开启条件和 SDK 用法；[候选验收](docs/WEB-TOOL-GATEWAY.md)记录普通与 SSE 真实流程。测试需安装 requirements-web-tools.txt 的可选依赖，真实 SDK 测试还需 anthropic；正常模式默认关闭，不依赖 SDK。当前生产未启用此策略。

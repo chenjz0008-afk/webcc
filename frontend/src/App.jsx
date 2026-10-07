@@ -8,6 +8,7 @@ const Accounts = lazy(() => import('./pages/Accounts.jsx'));
 const Resources = lazy(() => import('./pages/Resources.jsx'));
 const Updates = lazy(() => import('./pages/Updates.jsx'));
 const ApiAccess = lazy(() => import('./pages/ApiAccess.jsx'));
+const ApiKeys = lazy(() => import('./pages/ApiKeys.jsx'));
 
 const currentPage = () => modules.some(m => m[0] === location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
         {page === 'resources' && <Resources {...props} />}
         {page === 'updates' && <Updates {...props} />}
         {page === 'api' && <ApiAccess />}
+        {page === 'keys' && <ApiKeys {...props} />}
         </Suspense>
       </AdminShell>}
     <Snackbar open={Boolean(message)} autoHideDuration={6000} onClose={() => setMessage(null)} anchorOrigin={{vertical:'bottom',horizontal:'center'}}><Alert severity={message?.severity || 'success'} variant="filled" onClose={() => setMessage(null)}>{message?.text}</Alert></Snackbar>

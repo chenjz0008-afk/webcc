@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore proxy-only account egress before Docker starts
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/clewdr-manager/egress.py /var/lib/clewdr-manager
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

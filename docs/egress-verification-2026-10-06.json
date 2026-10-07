@@ -1,0 +1,128 @@
+{
+  "accounts": [
+    {
+      "name": "cc1",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "cc2",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb1",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb2",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb3",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb4",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb5",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb6",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb7",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb8",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    },
+    {
+      "name": "ccb9",
+      "running": true,
+      "network": true,
+      "proxy_tcp": true,
+      "direct_https_blocked": true,
+      "dns_loopback_only": true,
+      "ipv6_disabled": true
+    }
+  ],
+  "production_api": {
+    "status": 200,
+    "nonempty": true,
+    "text": "Hi."
+  },
+  "services": {
+    "clewdr-manager": "active",
+    "nginx": "active",
+    "webcc-egress": "active"
+  },
+  "boot_dependency": true,
+  "reboot_tested": false,
+  "production_public_https": {
+    "status": 200,
+    "certificate_verified": true,
+    "nonempty": true,
+    "text": "Hi."
+  },
+  "proxy_authentication": {
+    "checked": 11,
+    "forwarding_passed": 10,
+    "failed_account": "ccb1",
+    "failure": "SOCKS5 user rejected",
+    "claude_account_ban_confirmed": false
+  }
+}

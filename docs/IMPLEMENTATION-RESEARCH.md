@@ -38,3 +38,45 @@ LiteLLM 提供 Messages 接口和多上游适配，可作为候选组件。是�
 单次提示数据最多 128 KiB、32 层嵌套、128 条消息、64 个工具；这些是封装的容量限制，不能当作模型真实 token 上限。超限直接拒绝，不截断或删除历史。不支持的图片、thinking、服务端工具和额外字段明确拒绝。协议不合格请求不发送到账号，更不用于账号隔离判断。
 
 真实门槛为两个工具调用、乱序结果回传、一次版本冲突恢复、修改后回读以及恶意文档文本。只操作内存合成文档，版本冲突由测试器模拟；客户端不提供任意文件或命令执行。通过后才能推进实验网关；SDK、SSE、取消和实际应用仍需独立验收。
+
+## E01 · 主网关实验入口与 SDK
+
+2026-10-06 核查 [Anthropic SSE 协议](https://platform.claude.com/docs/en/build-with-claude/streaming)、[官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python) 与 [SDK 配置](https://platform.claude.com/docs/en/api/sdks/python)：工具流包含内容块起止和 input_json_delta，SDK 可以聚合最终消息；流内错误必须保持 error 事件。SDK 允许明确传入 base_url 和 key，无需读取本机 Claude Code 配置。
+
+复核 [sub2api 固定网关](https://github.com/Wei-Shaw/sub2api/blob/b8dece9000c68815a5b867ca5a1e6f236e173905/backend/internal/handler/gateway_handler.go) 的 wrapReleaseOnDone、账号等待和 FailoverCanceled：请求取消应回收槽位，失败切换应区分已向客户端输出的内容。采用这些生命周期原则，继续复用本项目现有选号与失败计数，不引入 Go 服务或复制其业务代码。
+
+网页提示模式无法从生成中的任意 JSON 片段证明参数合法，因此选择缓冲上游完整响应，校验后生成 SDK 可读的 SSE；等待时可发送 ping。它不是原生逐 token 生成，也不是 Anthropic fine-grained 工具流。实际工具仍由客户端执行；格式失败和客户端取消不计账号异常，HTTP/连接故障复用已有阈值。尚未输出工具块时可以切换账号，输出工具块后不重放。
+
+入口限定 /v1/messages，要求 MANAGER_WEB_TOOLS_ENABLED=true、X-WebCC-Tools: prompt-v1 和明确模型别名 webcc-prompt-v1。默认开关关闭，普通请求维持原来的转发方式。工具适配移到独立 web_tools 包供网关和实验共享，避免生产调用测试程序。该别名表示适配策略，不表示实际 Claude 模型身份；用量保留上游报告，包括额外提示开销，不称为官方计费精确值。
+
+验收包括默认网关回归、普通 SDK 与 SSE 工具往返、错误 ID 发送前拒绝、格式错误不隔离、跨账号切换、三次 500 阈值、排队和生成中的客户端断开。不据这些结果宣称图片、文档块、thinking、strict、Files、真实文档应用或完整官方协议已经支持。
+
+SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/anthropic/)为 1.11.0；[该版项目依赖](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/pyproject.toml)已改用 httpx2。测试使用 SDK 自带 DefaultHttpxClient(trust_env=False)，而不是旧 httpx.Client；显式提供临时 API key 和服务器 loopback Base URL，关闭 SDK 自动重试。依赖只安装到临时目录。
+
+## 2026-10-06：代理出口限制
+
+依据 Docker 官方 iptables 文档核查当前服务器为 iptables-nft 兼容后端。使用专用 bridge、DOCKER-USER 与 INPUT/FORWARD 防火墙链；先安装规则再启动容器，启动恢复失败不放行 Docker。官方 ClewdR 固定提交 061c6d8 的 config/clewdr_config.rs 使用 wreq Proxy::all；本地 SOCKS5 DNS 依赖在临时测试中导致 500，改为 SOCKS5h 后不开放直接 DNS 仍真实回复成功。
+
+来源：https://docs.docker.com/engine/network/firewall-iptables/ ，https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/config/clewdr_config.rs 。实现和边界见 EGRESS.md。
+
+## 2026-10-06：TypeScript SDK 与 HTTPS 文件流程
+
+依据官方 TypeScript SDK 及 helpers 接口使用 messages.create 和 messages.stream().finalMessage()，实际 npm 版本 0.131.0、Node v24.21.0。用独立模型别名与显式请求头测试近似通道，未伪装成官方 strict 或原生模型身份。Node 运行时经官方 SHA256 校验，npm 禁用安装脚本。候选 HTTPS 保持证书校验，使用临时 CA，并验证不信任 CA 时不会进入模型调用。真实合成 Markdown 文件按逻辑 ID 访问，校验目标编辑和其他字节不变；不把此流程称为 WordBuddy 或 DOCX 验收。
+
+来源：https://github.com/anthropics/anthropic-sdk-typescript ，https://platform.claude.com/docs/en/api/sdks/typescript 。结果见 TYPESCRIPT-SDK.md。
+
+## 2026-10-07 · C01 与 C24
+
+对照 [Claude 错误协议](https://platform.claude.com/docs/en/api/errors) 的状态类型、错误正文和 `request-id`，以及 [LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys) 的独立密钥、资源权限和速率控制。TypeScript SDK 固定 0.131.0；实际异常请求 ID 使用 `requestID`，流助手使用 `request_id`，通过真实 SDK 验证，避免依赖猜测的属性名。
+
+当前两核、约 2 GB 的服务器沿用现有网关，不新增 LiteLLM 服务或 PostgreSQL。独立密钥保存随机值的摘要，账号范围直接传给现有选号器，失败切换同样受范围约束。权限集中在鉴权入口，排队请求在获取资源前复核撤销与到期；已开始的请求允许完成。速率窗口使用加锁的单进程内存队列，重启会重置，不宣称提供分布式计费或官方 workspace 管理能力。
+
+验收包括：两名调用者不能跨账号范围、失败切换不能越界、管理接口不能被调用密钥访问、限速原子性、重启后撤销持久化、排队撤销、SDK 六轮真实文件工具流程及 TLS 校验。Files 等未来资源接口的所有权隔离须在该接口实现时继续验收。方案及证据见 [调用密钥](CALLER-KEYS.md)。
+
+## 2026-10-07 · 文档定位、并发读取及错误恢复扩展
+
+按 [官方工具结果协议](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) 匹配 tool_use_id 并使用 is_error 回传工具失败；结果反序回传，用实际文件验证定位和修改，不以模型文字声明作为通过依据。读取工具使用线程池执行；记录时间区间，设置 30 ms 测试等待以确认任务重叠，不作为模型速度或业务吞吐证明。
+
+新增相近的标准与优先审阅段落，段落 ID、原文及行号来自实际文件。局部修改只允许 B-P2 的留存天数改变，并回读检查；A、其他段落、表格、列表及引用链接保持。测试执行器拒绝 MISSING 与 PRIVATE，验证模型正确披露不存在和拒绝读取，不代替真实应用权限系统验收。
+
+格式检查复用 [markdown-it 14.1.0](https://github.com/markdown-it/markdown-it/releases/tag/14.1.0)，比较解析结构、链接属性和期望 HTML；不编写新 Markdown 解析器，不把 HTML 结构检查称为 DOCX 或视觉排版验收。依赖仅存在于服务器临时测试环境，不加入生产服务。
