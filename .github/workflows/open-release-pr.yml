@@ -15,6 +15,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           existing=$(gh pr list --repo chenjz0008-afk/webcc --head feat/web-file-resources --state open --json url --jq '.[0].url // empty')
           if [ -n "$existing" ]; then
             printf '%s\n' "$existing" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -28,4 +29,10 @@ jobs:
           ## 验证
           验收记录将随部署补充到 docs。账号、sessionKey、代理凭据、真实 API Key 和环境文件不进入仓库。PR 留给用户合并；本临时工作流创建 PR 后删除。
           BODY
-          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/web-file-resources --title '共享 PostgreSQL 状态、Redis 调度与工具能力扩展' --body-file /tmp/webcc-pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
+          if gh pr create --repo chenjz0008-afk/webcc --base main --head feat/web-file-resources --title '共享 PostgreSQL 状态、Redis 调度与工具能力扩展' --body-file /tmp/webcc-pr-body.md > /tmp/webcc-pr-result.txt 2>&1; then
+            cat /tmp/webcc-pr-result.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            cat /tmp/webcc-pr-result.txt | tee -a "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r line; do printf '::error::%s\n' "$line"; done < /tmp/webcc-pr-result.txt
+            exit 1
+          fi
