@@ -473,11 +473,11 @@ POST /v1/runs/{id}/tool_results
 
 提交返回 202，继续查询运行状态。错误结果设置 is_error=true。重复、未知、跨密钥或已取消的结果会被拒绝；批量提交具备事务原子性。
 
-也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。流式内容在结果确认后输出，不包含原生 Thinking 或实时标准输出。此模式是平台执行适配，不是官方沙箱协议的完整替代。
+也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。程序执行期间通过 text_delta 输出真实 stdout，随后返回 code_execution_tool_result。模型规划和参数校验完成后才返回工具参数，不提供原生 Thinking。此模式是平台执行适配，不是官方沙箱协议的完整替代。
 
 ## 15. Skills
 
-独立密钥需要 skills 权限。上传采用 JSON files 映射，包含标准 SKILL.md 和 UTF-8 文本资源。
+独立密钥需要 skills 权限。支持原有 JSON files 映射，以及官方 Python SDK 的 multipart files[] 上传。SDK 上传的所有文件须位于同一个顶层目录，包含 SKILL.md 和 UTF-8 文本资源。
 
 | 操作 | 接口 |
 | --- | --- |
@@ -485,19 +485,20 @@ POST /v1/runs/{id}/tool_results
 | 查询 / 删除 | GET / DELETE /v1/skills/{id} |
 | 新版本 | POST /v1/skills/{id}/versions |
 | 查询 / 删除指定版本 | GET / DELETE /v1/skills/{id}/versions/{version} |
+| 下载版本 ZIP | GET /v1/skills/{id}/versions/{version}/content |
 
 ```json
 {"files":{"SKILL.md":"---\nname: total-report\ndescription: Calculate a total\n---\nRun scripts/total.py.","scripts/total.py":"print(37+83)"}}
 ```
 
-创建返回 id 和 version。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
+JSON 创建返回 id 和 version；SDK 创建返回 latest_version_id。版本查询支持 latest，列表使用 limit、page 与 next_page 分页。接受 SDK 的 beta=true 查询参数。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
 
 每包最多 64 个资源、合计 256 KiB；每项最多 64 KiB。运行依赖需预装在沙箱模板中。这里只管理用户上传的 Skills，不预置第三方 Skill 内容。
 
 
 ## 16. 远程 MCP
 
-独立密钥需要 mcp 权限；Messages 还需要 messages 和 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不保存到任务或日志。
+独立密钥需要 mcp 权限；Messages 还需要 messages 和 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不写入日志。同步请求结束后关闭连接；持久任务的认证参数加密保存，任务结束、取消或结果未知时删除。更换平台管理密钥后，已有持久任务的认证参数无法解密。
 
 | 操作 | 接口 |
 | --- | --- |
@@ -522,6 +523,47 @@ curl --fail-with-body -sS --max-time 180 \
 
 响应 content 包含 mcp_tool_use、mcp_tool_result 和最终 text。工具真实执行后才提供结果；执行状态无法确认时不自动重放。工具参数经过 JSON Schema 校验。
 
-支持 Bearer authorization_token、default_config.enabled 和 configs.{工具名}.enabled。最多两个服务、32 个启用工具、8 次调用和四轮模型请求；总期限最多 140 秒，每次远程操作最多 30 秒。目录最多 128 KiB，单次工具文本最多 64 KiB。工具目录可用于按需发现；Messages 暂不接受 defer_loading。仅支持 Streamable HTTP 和文本结果。
+支持 Bearer authorization_token、default_config.enabled、configs.{工具名}.enabled 和 defer_loading。延迟加载的工具通过 webcc_tool_search 发现，返回 tool_search_tool_result 与 tool_reference。连接和目录在同一请求内复用，认证参数不跨调用者共享。仅支持 Streamable HTTP 和文本结果。
 
-设置 stream=true 返回 SSE，包含工具参数增量和结果块；内容在结果确认后输出。该接口通过网页模型与平台执行器实现，不提供原生约束采样、Thinking 签名或官方 Connector 的全部扩展。
+同步模式最多两个服务、32 个启用工具、8 次调用和四轮模型请求；总期限最多 140 秒。连接初始化最多 20 秒，后续单次远程操作最多 30 秒。目录最多 128 KiB，单次工具文本最多 64 KiB。
+
+设置 stream=true 返回 SSE，模型规划通过校验后发送工具参数，远程执行返回后立即发送结果块。参数不会在校验前交给客户端执行。该接口通过网页模型与平台执行器实现，不提供原生约束采样、Thinking 签名或官方 Connector 的全部扩展。
+
+
+### 16.1 持久暂停与恢复
+
+首次请求加入 max_iterations（1—4，默认 3）启用持久模式。达到本轮预算后返回 stop_reason=pause_turn 与 container.id。整个会话最多 16 轮、32 次工具调用，有效期 600 秒。
+
+| 操作 | 接口 |
+| --- | --- |
+| 查询状态与当前结果 | GET /v1/mcp/sessions/{id} |
+| 恢复 waiting 会话 | POST /v1/mcp/sessions/{id}/resume |
+| 取消 | POST /v1/mcp/sessions/{id}/cancel |
+| 删除已终止会话 | DELETE /v1/mcp/sessions/{id} |
+
+也可通过 Messages 恢复：
+
+```json
+{"model":"webcc-mcp-v1","container":"实际 container.id","stream":true}
+```
+
+恢复请求使用 X-WebCC-Tools: mcp-v1，继续已有历史，仅返回本轮新增内容。会话仍在 processing 时先查询状态，不能重复恢复。远程执行中断且结果无法确定时，状态为 unknown，不自动重放，也不允许恢复；由调用方核对外部资源。跨密钥访问返回 404。
+
+## 17. 文档定位引用
+
+POST /v1/messages 使用 X-WebCC-Tools: citations-v1 与 model=webcc-citations-v1。接受 UTF-8 文本文档、内联 base64 PDF，以及所属密钥的 file_id；文档需启用 citations.enabled。独立密钥需要 messages 和 experimental_tools 权限；引用文件还需 files 权限。
+
+```json
+{
+  "model":"webcc-citations-v1",
+  "max_tokens":2048,
+  "messages":[{"role":"user","content":[
+    {"type":"document","title":"预算","source":{"type":"text","data":"北区预算为37。\n南区预算为83。"},"citations":{"enabled":true}},
+    {"type":"text","text":"北区预算是多少？引用原文。"}
+  ]}]
+}
+```
+
+文本引用返回 char_location，字符索引从 0 开始，结束索引不包含在引用内。PDF 返回 page_location，页码从 1 开始，结束页码不包含在引用内。每段引用须与指定文档、指定页面原文逐字匹配；无法验证的结果返回 502。stream=true 返回文本及 citations_delta，校验完成后才输出。
+
+每次最多 8 份文档；PDF 单文件最多 20 MiB、20 页，提取文本最多 64 KiB。不支持加密 PDF、扫描件 OCR 或其他工具策略混用。这是平台定位与校验的引用，不包含官方签名或加密来源信息。

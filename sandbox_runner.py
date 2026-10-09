@@ -20,16 +20,33 @@ def atomic(path, value):
 
 
 class BoundedOutput(io.StringIO):
+    def __init__(self, notify=None):
+        super().__init__()
+        self.notify = notify
+
     def write(self, value):
         remaining = max(0, 16384 - self.tell())
         super().write(value[:remaining])
+        if self.notify:
+            self.notify()
         return len(value)
+
+    def flush(self):
+        if self.notify:
+            self.notify(True)
 
 
 async def main():
     config = json.loads((ROOT / 'config.json').read_text())
     deadline = time.monotonic() + config['seconds']
-    stdout, stderr = BoundedOutput(), BoundedOutput()
+    last_progress = 0
+    def progress(force=False):
+        nonlocal last_progress
+        now = time.monotonic()
+        if force or now - last_progress >= .05:
+            atomic(ROOT / 'progress.json', {'stdout': stdout.getvalue(), 'stderr': stderr.getvalue()})
+            last_progress = now
+    stdout, stderr = BoundedOutput(progress), BoundedOutput(progress)
     slots = asyncio.Semaphore(8)
     count = 0
 

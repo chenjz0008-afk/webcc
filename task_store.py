@@ -71,22 +71,28 @@ class TaskStore:
     def list(self, owner, kind, query):
         from urllib.parse import parse_qs
         params = parse_qs(query, keep_blank_values=True)
-        if set(params) - {'limit', 'after_id'} or any(len(v) != 1 for v in params.values()):
+        if set(params) - {'limit', 'after_id', 'before_id'} or any(len(v) != 1 for v in params.values()) or {'after_id', 'before_id'} <= params.keys():
             raise FileProblem(400, 'Invalid pagination')
         try:
             limit = int(params.get('limit', ['20'])[0])
         except ValueError:
             raise FileProblem(400, 'Invalid limit') from None
-        if not 1 <= limit <= 100:
-            raise FileProblem(400, 'Limit must be 1 to 100')
-        cursor = self.get(params['after_id'][0], owner) if 'after_id' in params else None
+        if not 1 <= limit <= 1000:
+            raise FileProblem(400, 'Limit must be 1 to 1000')
+        before = 'before_id' in params
+        field = 'before_id' if before else 'after_id'
+        cursor = self.get(params[field][0], owner) if field in params else None
         if cursor and cursor['kind'] != kind:
             raise FileProblem(400, 'Invalid cursor kind')
         with self.cluster.pool.connection() as db:
-            rows = db.execute('''SELECT id FROM webcc_tasks WHERE owner=%s AND kind=%s
-                AND (created,id)<(%s,%s) ORDER BY created DESC,id DESC LIMIT %s''',
+            comparison, order = ('>', 'ASC') if before else ('<', 'DESC')
+            rows = db.execute(f'''SELECT id FROM webcc_tasks WHERE owner=%s AND kind=%s
+                AND (created,id){comparison}(%s,%s) ORDER BY created {order},id {order} LIMIT %s''',
                 (owner, kind, cursor['created'] if cursor else float('inf'), cursor['id'] if cursor else '', limit + 1)).fetchall()
-        return [self.get(r[0], owner) for r in rows[:limit]], len(rows) > limit
+        chosen = rows[:limit]
+        if before:
+            chosen.reverse()
+        return [self.get(r[0], owner) for r in chosen], len(rows) > limit
 
     def delete(self, identity, owner):
         with self.transaction(identity, owner) as (db, item):
@@ -120,6 +126,9 @@ class TaskStore:
             owners = db.execute('SELECT owner FROM webcc_skills WHERE id=%s LIMIT 1', (identity,)).fetchone()
             if owners and owners[0] != owner:
                 raise FileProblem(404, 'Skill not found')
+            existing = db.execute("SELECT body->>'name' FROM webcc_skills WHERE id=%s LIMIT 1", (identity,)).fetchone()
+            if existing and existing[0] != bundle['name']:
+                raise FileProblem(400, 'Skill name is immutable across versions')
             if db.execute('SELECT count(*) FROM webcc_skills WHERE owner=%s', (owner,)).fetchone()[0] >= 128:
                 raise FileProblem(413, 'Skill version quota reached')
             db.execute('INSERT INTO webcc_skills VALUES (%s,%s,%s,%s,%s)', (identity, version, owner, time.time(), Jsonb(bundle)))
@@ -127,10 +136,10 @@ class TaskStore:
 
     def skills(self, owner, identity=None):
         with self.cluster.pool.connection() as db:
-            rows = db.execute('''SELECT id,version,created,body->>'name',body->>'description'
+            rows = db.execute('''SELECT id,version,created,body->>'name',body->>'description',body->>'display_name'
                 FROM webcc_skills WHERE owner=%s AND (%s::text IS NULL OR id=%s)
                 ORDER BY created DESC,id DESC LIMIT 128''', (owner, identity, identity)).fetchall()
-        return [{'id': r[0], 'version': r[1], 'created_at': stamp(r[2]), 'name': r[3], 'description': r[4], 'type': 'skill'} for r in rows]
+        return [{'id': r[0], 'version': r[1], 'created_at': stamp(r[2]), 'name': r[3], 'description': r[4], 'display_name': r[5] or r[3], 'type': 'skill'} for r in rows]
 
     def delete_skill(self, owner, identity, version=None):
         with self.cluster.pool.connection() as db:
@@ -142,7 +151,7 @@ class TaskStore:
 
 
 def public_run(item):
-    return {k: copy.deepcopy(item.get(k)) for k in ('id', 'state', 'result', 'error', 'pending_tools', 'cleanup_pending')} | {
+    return {k: copy.deepcopy(item.get(k)) for k in ('id', 'state', 'result', 'error', 'pending_tools', 'cleanup_pending', 'progress')} | {
         'files': copy.deepcopy(item.get('output_files', [])),
         'type': 'run', 'created_at': stamp(item['created']), 'expires_at': stamp(item['expires'])}
 

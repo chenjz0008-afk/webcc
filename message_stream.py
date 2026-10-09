@@ -16,7 +16,16 @@ def events(message):
     if 'usage' in start:
         start['usage']['output_tokens'] = 0
     yield event('message_start', message=start)
-    for index, original in enumerate(message['content']):
+    yield from block_events(message['content'])
+    fields = {'delta': {'stop_reason': message['stop_reason'], 'stop_sequence': message.get('stop_sequence')}}
+    if 'usage' in message:
+        fields['usage'] = {'output_tokens': message['usage']['output_tokens']}
+    yield event('message_delta', **fields)
+    yield event('message_stop')
+
+
+def block_events(content, start=0):
+    for index, original in enumerate(content, start):
         block = copy.deepcopy(original)
         kind = block['type']
         if kind in {'tool_use', 'server_tool_use', 'mcp_tool_use'}:
@@ -33,22 +42,18 @@ def events(message):
                 yield event('content_block_delta', index=index, delta={'type': 'text_delta', 'text': value[offset:offset+256]})
             for citation in citations:
                 yield event('content_block_delta', index=index, delta={'type': 'citations_delta', 'citation': citation})
-        elif kind in {'web_search_tool_result', 'web_fetch_tool_result', 'mcp_tool_result', 'code_execution_tool_result'}:
+        elif kind in {'web_search_tool_result', 'web_fetch_tool_result', 'mcp_tool_result', 'code_execution_tool_result', 'tool_search_tool_result'}:
             yield event('content_block_start', index=index, content_block=block)
         else:
             raise ValueError('Unsupported adapter stream block')
         yield event('content_block_stop', index=index)
-    fields = {'delta': {'stop_reason': message['stop_reason'], 'stop_sequence': message.get('stop_sequence')}}
-    if 'usage' in message:
-        fields['usage'] = {'output_tokens': message['usage']['output_tokens']}
-    yield event('message_delta', **fields)
-    yield event('message_stop')
 
 
 class Stream:
     def __init__(self, handler):
         self.handler, self.started = handler, False
         self.heartbeat = time.monotonic()
+        self.index, self.text_open = 0, False
 
     def start(self):
         self.handler.connection.settimeout(2)
@@ -81,4 +86,36 @@ class Stream:
 
     def error(self, message, kind='api_error'):
         self.send(event('error', error={'type': kind, 'message': message}))
+        self.handler.write_stream(b'0\r\n\r\n')
+
+
+    def begin(self, message):
+        self.send(event('message_start', message={**message, 'content': [], 'stop_reason': None, 'stop_sequence': None}))
+
+    def block(self, value):
+        self.close_text()
+        for data in block_events([value], self.index):
+            self.check()
+            self.send(data)
+        self.index += 1
+
+    def text(self, value):
+        if not value:
+            return
+        if not self.text_open:
+            self.send(event('content_block_start', index=self.index, content_block={'type': 'text', 'text': ''}))
+            self.text_open = True
+        self.send(event('content_block_delta', index=self.index, delta={'type': 'text_delta', 'text': value}))
+
+    def close_text(self):
+        if self.text_open:
+            self.send(event('content_block_stop', index=self.index))
+            self.index += 1
+            self.text_open = False
+
+    def finish(self, reason, usage=None):
+        self.close_text()
+        self.send(event('message_delta', delta={'stop_reason': reason, 'stop_sequence': None},
+                        **({'usage': {'output_tokens': usage['output_tokens']}} if usage else {})))
+        self.send(event('message_stop'))
         self.handler.write_stream(b'0\r\n\r\n')

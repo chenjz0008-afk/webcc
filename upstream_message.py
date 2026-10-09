@@ -1,0 +1,50 @@
+"""Read native web SSE before the lossy ClewdR nonstream conversion."""
+import json
+
+
+class UnexpectedTool(ValueError):
+    pass
+
+
+def read(response):
+    if 'text/event-stream' not in response.getheader('Content-Type', ''):
+        raw = response.read(1048577)
+        if len(raw) > 1048576 or response.length not in (None, 0):
+            raise ValueError('Upstream response exceeds limit')
+        return raw
+    message, blocks, completed, size = None, {}, False, 0
+    for line in response:
+        size += len(line)
+        if size > 1048576 or len(line) > 131072:
+            raise ValueError('Upstream stream exceeds limit')
+        if not line.startswith(b'data: '):
+            continue
+        event = json.loads(line[6:])
+        kind = event.get('type')
+        if kind == 'error':
+            raise ValueError('Upstream stream failed')
+        if kind == 'message_start':
+            if message is not None:
+                raise ValueError('Repeated message start')
+            message = event['message']
+        elif kind == 'content_block_start':
+            block = event['content_block']
+            if block.get('type') not in {'text', 'thinking', 'redacted_thinking'}:
+                raise UnexpectedTool('Unexpected built-in tool execution in client-tool mode')
+            if block['type'] == 'text':
+                blocks[event['index']] = {'type': 'text', 'text': block.get('text', '')}
+        elif kind == 'content_block_delta' and event.get('delta', {}).get('type') == 'text_delta':
+            blocks[event['index']]['text'] += event['delta']['text']
+        elif kind == 'message_delta':
+            if message is None:
+                raise ValueError('Missing message start')
+            message.update(event.get('delta', {}))
+            if 'usage' in event:
+                message.setdefault('usage', {}).update(event['usage'])
+        elif kind == 'message_stop':
+            completed = True
+            break
+    if not message or not completed or message.get('stop_reason') not in {'end_turn', 'max_tokens', 'refusal', 'stop_sequence'}:
+        raise ValueError('Incomplete upstream message')
+    message['content'] = [blocks[i] for i in sorted(blocks)]
+    return json.dumps(message, ensure_ascii=False).encode()

@@ -1,3 +1,11 @@
+## 2026-10-09 · 引用、SDK 资源与执行进度
+
+在 WebCC 增加逐字校验的文本字符/PDF 页码引用、官方 Python SDK 的 Skills multipart 与分页 ZIP 下载；Files 与 Batches 的真实 SDK 生命周期通过。模型适配改读真实 SSE，保留拒答和截断，避免 ClewdR 非流式转换丢失结束原因。原版 ClewdR 未修改。
+
+E2B 在执行期间输出真实 stdout；MCP 同请求复用连接，支持延迟发现、加密持久检查点和 pause_turn 恢复。调用前持久化执行标记，结果未知时禁止重放；相同失败参数不随新调用 ID 重试。继续复用现有 PostgreSQL、Redis、Procrastinate，无新增状态服务。
+
+服务器隔离环境 190 项回归全部通过，无跳过；真实账号、E2B、DeepWiki 与官方 Python SDK 1.12.1 验收通过。stdout 首段 9.17 秒。认证隔离另用受控 MCP 服务验收，不将模拟认证称为 DeepWiki 认证。跨进程竞争、进程终止后锁释放及未知结果防重放通过；第二台物理服务器尚未验收。Brave 严格搜索约束按用户决定暂缓。见 [验收记录](docs/finish-acceptance-2026-10-09.json)。
+
 ## 2026-10-09 · E2B 与持久任务
 
 发布 Batches、Skills 不可变版本、E2B 代码执行、生成文件下载和程序化客户端工具调用。采用官方 E2B SDK、Procrastinate 事务队列和 Agent Skills 结构；原版 ClewdR 保持独立。用量、精确计数、缓存命中和计费对齐按用户要求排除。

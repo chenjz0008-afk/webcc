@@ -965,6 +965,10 @@ class Handler(BaseHTTPRequestHandler):
             messages(self)
             return
         mode = self.headers.get("X-WebCC-Tools")
+        if mode == 'citations-v1' and self.command == 'POST' and self.manager.web_tools_enabled:
+            from document_citations import messages
+            messages(self)
+            return
         if mode == 'mcp-v1' and self.command == 'POST':
             from mcp_messages import messages
             messages(self)

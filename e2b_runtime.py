@@ -71,6 +71,18 @@ class E2BRuntime:
             result.append(self.read_json(sandbox, 'requests/' + safe_path(entry.name)))
         return result
 
+    def poll(self, sandbox):
+        code = ("import json,pathlib; p=pathlib.Path('" + ROOT + "'); "
+                "load=lambda f:json.loads(f.read_text()) if f.exists() else None; "
+                "v={'done':load(p/'done.json'),'progress':load(p/'progress.json'),"
+                "'calls':[load(f) for f in sorted((p/'requests').glob('*.json'))][:33]}; "
+                "s=json.dumps(v); assert len(s.encode())<=262144; print(s)")
+        import shlex
+        result = sandbox.commands.run('python -c ' + shlex.quote(code), timeout=10)
+        if result.exit_code or len(result.stdout.encode()) > 262144:
+            raise FileProblem(502, 'Invalid sandbox polling result')
+        return json.loads(result.stdout)
+
     def deliver(self, sandbox, identity, result):
         sandbox.files.write(ROOT + '/responses/' + identity + '.tmp', json.dumps(result))
         sandbox.files.rename(ROOT + '/responses/' + identity + '.tmp', ROOT + '/responses/' + identity + '.json')

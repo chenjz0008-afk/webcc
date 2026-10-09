@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from manager import ClientGone, Problem
+from api_keys import KeyProblem
 from jsonschema.exceptions import ValidationError, SchemaError, RefResolutionError
 from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
@@ -110,9 +111,8 @@ def _forward(handler, admit):
                 response = connection.getresponse()
                 result.update(status=response.status, retry_after=response.getheader('Retry-After'),
                               node_error=response.getheader('X-WebCC-Node-Error') == '1')
-                raw = response.read(1048577)
-                if len(raw) > 1048576 or response.length not in (None, 0):
-                    raise ValueError('Invalid upstream size')
+                from upstream_message import read
+                raw = read(response)
                 result['body'] = raw
             except Exception as exc:
                 result['failure'] = type(exc).__name__
@@ -147,7 +147,7 @@ def _forward(handler, admit):
                 if sent and time.monotonic() - heartbeat >= 5:
                     chunk(b'event: ping\ndata: {"type":"ping"}\n\n')
                     heartbeat = time.monotonic()
-        except (ClientGone, OSError) as exc:
+        except (ClientGone, OSError, KeyProblem) as exc:
             cancelled.set()
             if transport.get('socket'):
                 try:
@@ -155,7 +155,9 @@ def _forward(handler, admit):
                 except OSError:
                     pass
             done.wait(1)
-            if isinstance(exc, TimeoutError):
+            if isinstance(exc, KeyProblem):
+                error(exc.status, 'permission_error' if exc.status == 403 else 'authentication_error', 'Caller permission was revoked')
+            elif isinstance(exc, TimeoutError):
                 error(504, 'api_error', 'Experimental request deadline exceeded', 'request_timeout')
             else:
                 handler.close_connection = True
@@ -165,6 +167,9 @@ def _forward(handler, admit):
             last = (503, 'api_error', 'Worker node unavailable')
             continue
         if result.get('failure'):
+            if result['failure'] == 'UnexpectedTool':
+                last = (502, 'api_error', 'Unexpected server tool execution; request was not replayed', 'unexpected_server_tool')
+                break
             status = 504 if result['failure'] == 'TimeoutError' else 502
             last = (status, 'api_error', 'Experimental upstream connection failed')
         elif status >= 400:

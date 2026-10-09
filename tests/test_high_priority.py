@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import types
+import time
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 from mcp_connector import validate_server, invoke, configured_tools, operation
@@ -65,8 +66,7 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(session.call_tool.await_count, 2)
 
     def test_request_constraints(self):
-        for changes in ({'stream': 'true'}, {'model': 'claude-sonnet-4-6'}, {'mcp_servers': [SERVER, SERVER]},
-                        {'tools': [{'type': 'mcp_toolset', 'mcp_server_name': 'deepwiki', 'default_config': {'defer_loading': True}}]}):
+        for changes in ({'stream': 'true'}, {'model': 'claude-sonnet-4-6'}, {'mcp_servers': [SERVER, SERVER]}):
             with self.subTest(changes=changes), self.assertRaises(FileProblem):
                 prepare_request({**request(), **changes})
 
@@ -80,7 +80,7 @@ class MCPTests(unittest.TestCase):
         final = {**reply('unused'), 'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'Remote read failed.'}]}
         handler = types.SimpleNamespace(manager=types.SimpleNamespace(request_seconds=150), caller_key='owner')
         remote = MagicMock(side_effect=[[TOOL], FileProblem(502, 'unknown')])
-        with patch('mcp_messages.operation', remote), patch('mcp_messages.infer', side_effect=[reply('tool1'), reply('tool2'), final]):
+        with patch('mcp_messages.Connections.operation', remote), patch('mcp_messages.infer', side_effect=[reply('tool1'), reply('tool2'), final]):
             result = execute(handler, request(), lambda: None)
         self.assertEqual(remote.call_count, 2)  # one directory, one execution
         self.assertEqual(result['model'], MODEL)
@@ -92,7 +92,7 @@ class RuntimeStreamFailureTests(unittest.TestCase):
     def test_disconnect_cancels_and_enqueues_without_second_http_response(self):
         from runtime_api import messages
         manager = types.SimpleNamespace(tasks=MagicMock())
-        manager.tasks.get.return_value = {'id': 'run_webcc_fixture', 'state': 'processing'}
+        manager.tasks.get.return_value = {'id': 'run_webcc_fixture', 'state': 'processing', 'expires': time.time() + 300}
         manager.tasks.transaction.return_value.__enter__.return_value = (MagicMock(), {})
         handler = types.SimpleNamespace(manager=manager, caller_key=None, path='/v1/messages',
             headers={'X-WebCC-Runtime': 'e2b-v1'}, respond=MagicMock(), close_connection=False,

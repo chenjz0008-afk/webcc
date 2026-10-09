@@ -1,6 +1,6 @@
 """Remote MCP through the official SDK, isolated per request and explicit proxy."""
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, ExitStack
 from datetime import timedelta
 import hashlib
 import ipaddress
@@ -108,7 +108,8 @@ async def connect(server):
                                  follow_redirects=False, event_hooks={'request': [check_request]}) as client:
         async with streamable_http_client(server['url'], http_client=client) as (read, write, _):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as session:
-                await session.initialize()
+                async with asyncio.timeout(20):
+                    await session.initialize()
                 yield session
 
 
@@ -149,33 +150,68 @@ async def invoke(session, tool, arguments):
     return {'content': content, 'is_error': bool(response.isError)}
 
 
-def operation(server, name=None, arguments=None, timeout=30):
-    if name is not None and (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) or not isinstance(arguments, dict)):
-        raise FileProblem(400, 'Invalid MCP tool call')
-    if not SLOTS.acquire(blocking=False):
-        raise FileProblem(429, 'MCP connections are busy')
-    async def run():
-        async with asyncio.timeout(max(.1, min(30, timeout))):
-            async with connect(server) as session:
-                tools = await catalog(session)
+class Connections:
+    def __enter__(self):
+        from anyio.from_thread import start_blocking_portal
+        if not SLOTS.acquire(blocking=False):
+            raise FileProblem(429, 'MCP connections are busy')
+        self.stack, self.sessions, self.directories, self.failed = ExitStack(), {}, {}, set()
+        try:
+            self.portal = self.stack.enter_context(start_blocking_portal())
+        except BaseException:
+            SLOTS.release()
+            raise
+        return self
+
+    def __exit__(self, *error):
+        try:
+            return self.stack.__exit__(*error)
+        except Exception as failure:
+            print('mcp_close_failed', type(failure).__name__, flush=True)
+            return False
+        finally:
+            SLOTS.release()
+
+    def operation(self, server, name=None, arguments=None, timeout=30):
+        validate_server(server)
+        if name is not None and (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) or not isinstance(arguments, dict)):
+            raise FileProblem(400, 'Invalid MCP tool call')
+        identity = (server['name'], server['url'], server.get('authorization_token'))
+        if identity in self.failed:
+            raise FileProblem(502, 'MCP session failed; remote operations were not replayed')
+        async def run():
+            async with asyncio.timeout(max(.1, min(30, timeout))):
+                session = self.sessions[identity]
+                if identity not in self.directories:
+                    self.directories[identity] = await catalog(session)
+                tools = self.directories[identity]
                 if name is None:
                     return tools
                 tool = next((t for t in tools if t['name'] == name), None)
                 if not tool:
                     raise FileProblem(400, 'MCP tool was not declared by this server')
                 return await invoke(session, tool, arguments)
-    try:
-        validate_server(server)
-        return asyncio.run(run())
-    except FileProblem:
-        raise
-    except Exception:
-        raise FileProblem(502, 'MCP connection or execution failed; operation was not retried') from None
-    finally:
-        SLOTS.release()
+        try:
+            if identity not in self.sessions:
+                self.sessions[identity] = self.stack.enter_context(self.portal.wrap_async_context_manager(connect(server)))
+            return self.portal.call(run)
+        except FileProblem:
+            raise
+        except Exception:
+            self.failed.add(identity)
+            raise FileProblem(502, 'MCP connection or execution failed; operation was not retried') from None
+
+
+def operation(server, name=None, arguments=None, timeout=30):
+    with Connections() as connections:
+        return connections.operation(server, name, arguments, timeout)
 
 
 def route(handler, target):
+    if target.path.startswith('/v1/mcp/sessions/'):
+        from mcp_tasks import route as session_route
+        session_route(handler, target)
+        return
     handler.authenticate(scope='mcp')
     handler.adapter = 'mcp-connector-v1'
     if handler.command != 'POST' or target.query or target.path not in {'/v1/mcp/tools', '/v1/mcp/call'}:

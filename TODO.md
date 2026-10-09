@@ -1,6 +1,6 @@
 # Claude API 能力完善待办
 
-更新时间：2026-10-09。当前开发分支：`feat/durable-tools-runtime`。
+更新时间：2026-10-09。当前开发分支：`feat/high-priority-api`。
 
 这里仅保留未完成事项。完整背景见 [方案](docs/CLAUDE-API-PLAN.md)，已完成内容见 [变更记录](CHANGELOG.md)，回滚方式见 [开发说明](docs/DEVELOPMENT.md)。
 
@@ -86,12 +86,12 @@
   - 自然结束、工具调用、截断、拒答和失败正确区分；不伪报正常空回答。
 
 - [ ] C15 图片、PDF 和引用的完整范围。
-  - 普通 Messages 的内联 PNG 与 base64 PDF 已实测；客户端工具附件适配已发布，PDF、PNG 和工具结果 PDF 的真实候选往返通过；继续其他格式、复杂布局/容量及原生引用，不能将当前部分结果视为完整支持。
+  - 普通 Messages 的内联 PNG 与 base64 PDF 已实测；客户端工具附件适配已发布，PDF、PNG 和工具结果 PDF 的真实候选往返通过；继续其他格式、复杂布局/容量及原生引用，不能将当前部分结果视为完整支持。平台字符引用、PDF 页码引用及逐字校验已通过，见 docs/finish-acceptance-2026-10-09.json。
   - 转发支持的 image/document 来源、PDF 页面和 citations 块。
   - 验收：含表格、分页、图片及相近段落的测试文档，实际答案和引用可定位；错误引用、乱码和不支持来源有明确结论。
 
 - [ ] C16 Files 与资源隔离。
-  - 平台 Files 上传、列表、元数据、下载、删除、到期、密钥隔离与普通 Messages 的 file_id 引用已完成生产后端发布与公网实测，见 [平台文件](docs/MANAGED-FILES.md)。E2B 生成文件的下载、资源绑定与权限已实测发布；继续 Claude 网页云端资源下载和官方兼容验收；不以平台资源代替官方 Files 验收。
+  - 平台 Files 上传、列表、元数据、下载、删除、到期、密钥隔离与普通 Messages 的 file_id 引用已完成生产后端发布与公网实测，见 [平台文件](docs/MANAGED-FILES.md)。E2B 生成文件的下载、资源绑定与权限已实测发布；官方 Python SDK 的上传、查询、下载、列表、删除已通过；继续 Claude 网页云端资源下载及未覆盖扩展；不以平台资源代替官方 Files 验收。
   - 验收：上传后真实引用成功，删除后不能继续引用；跨用户读取被拒绝，切换账号不产生找不到资源或越权读取。
 
 - [ ] C18 Prompt Caching。
@@ -101,12 +101,8 @@
 ## D. 服务端工具及扩展
 
 - [ ] C19 搜索与网页抓取。
-  - 网页搜索已开启生产并重载 11 个账号，真实 web_search/web_fetch 通过，见 [记录](docs/WEB-SEARCH-SANDBOX.md)。继续官方工具配置、结果块、原生引用、次数限制及 pause_turn 语义适配。
+  - 网页搜索已开启生产并重载 11 个账号，真实 web_search/web_fetch 通过，见 [记录](docs/WEB-SEARCH-SANDBOX.md)。继续官方工具配置、结果块、原生引用及 pause_turn 语义适配；严格次数与域名控制按用户决定暂缓。
   - 验收：真实搜索和抓取返回可核对来源；次数限制、失败和暂停恢复正确。自建搜索单独标明。
-
-- [ ] C21 MCP、工具发现与延迟加载。
-  - 远程 MCP 已复用官方 SDK，实现 HTTPS 代理连接、独立权限、工具目录、筛选、Schema 校验和真实模型执行循环；DeepWiki 实测通过。继续认证服务真实验收与 Messages 延迟加载，见 docs/HIGH-PRIORITY-API.md。
-  - 验收：实际 MCP 工具发现、调用及结果回传成功；跨用户认证隔离，未知工具不执行。
 
 - [ ] C23 官方其他扩展接口。
   - Skills 平台管理、版本快照与真实执行已完成，见持久任务报告；继续明确 Admin 与 Managed Agents 的范围，不将平台接口声明为官方全部产品。

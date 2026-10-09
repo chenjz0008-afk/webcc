@@ -42,7 +42,7 @@ def main():
     os.umask(0o077)
     app, _ = build_app(procrastinate.PsycopgConnector(conninfo=os.environ['MANAGER_DATABASE_URL'], min_size=1, max_size=2))
     with app.open():
-        app.run_worker(queues=['webcc-runtime'], concurrency=1)
+        app.run_worker(queues=['webcc-runtime'], concurrency=max(1, min(2, int(os.environ.get('MANAGER_RUNTIME_WORKERS', '2')))))
 
 
 if __name__ == '__main__':

@@ -46,7 +46,7 @@ def prepare(raw, files=None, owner=None, on_media=None):
         raise ValueError('Experimental system supports only text')
     # Bound the full prompt, including system and protocol instructions.
     bounded_json({'system': system, 'prompt': prompt})
-    upstream = {'model': 'claude-sonnet-4-6', 'max_tokens': data['max_tokens'], 'stream': False,
+    upstream = {'model': 'claude-sonnet-4-6', 'max_tokens': data['max_tokens'], 'stream': True,
                 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': prompt}, *attachments] if attachments else prompt}]}
     if system:
         upstream['system'] = system
