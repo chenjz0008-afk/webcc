@@ -38,7 +38,7 @@ class ApiKeys:
             raise KeyProblem(400, '密钥名称不能为空或超过 80 字符')
         if not isinstance(accounts, list) or not accounts or any(not isinstance(v, str) for v in accounts):
             raise KeyProblem(400, '必须指定密钥可以使用的账号')
-        if not isinstance(scopes, list) or not scopes or any(v not in ['messages', 'models', 'experimental_tools', 'files', 'batches', 'skills', 'runs'] for v in scopes):
+        if not isinstance(scopes, list) or not scopes or any(v not in ['messages', 'models', 'experimental_tools', 'files', 'batches', 'skills', 'runs', 'mcp'] for v in scopes):
             raise KeyProblem(400, '密钥功能权限无效')
         if type(rpm) is not int or not 1 <= rpm <= 1000:
             raise KeyProblem(400, 'RPM 必须在 1—1000 之间')

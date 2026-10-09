@@ -109,21 +109,5 @@ def complete(raw, request):
         raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation') from None
 
 
-def events(message):
-    def emit(kind, **data):
-        return ('event: ' + kind + '\ndata: ' + json.dumps({'type': kind, **data}, ensure_ascii=False) + '\n\n').encode()
-    start = {**message, 'content': [], 'stop_reason': None, 'usage': {**message['usage'], 'output_tokens': 0}}
-    yield emit('message_start', message=start)
-    for index, block in enumerate(message['content']):
-        tool = block['type'] == 'tool_use'
-        initial = {**block, 'input': {}} if tool else {'type': 'text', 'text': ''}
-        yield emit('content_block_start', index=index, content_block=initial)
-        value = json.dumps(block['input'], ensure_ascii=False) if tool else block['text']
-        for offset in range(0, len(value), 256):
-            delta = {'type': 'input_json_delta' if tool else 'text_delta',
-                     'partial_json' if tool else 'text': value[offset:offset + 256]}
-            yield emit('content_block_delta', index=index, delta=delta)
-        yield emit('content_block_stop', index=index)
-    yield emit('message_delta', delta={'stop_reason': message['stop_reason'], 'stop_sequence': None},
-               usage={'output_tokens': message['usage']['output_tokens']})
-    yield emit('message_stop')
+
+from message_stream import events

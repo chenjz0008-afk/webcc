@@ -37,9 +37,12 @@ def _forward(handler, admit):
     handler.adapter = 'prompt-v1; schema-validated; no-native-strict; buffered'
     handler.request_id = uuid.uuid4().hex
     handler.request_deadline = time.monotonic() + handler.manager.request_seconds
+    if getattr(handler, 'outer_deadline', None):
+        handler.request_deadline = min(handler.request_deadline, handler.outer_deadline)
     sent = False
 
     def alive():
+        handler.check_caller()
         if select.select([handler.connection], [], [], 0)[0]:
             if not handler.connection.recv(1, socket.MSG_PEEK):
                 raise ClientGone()

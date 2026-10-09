@@ -2,3 +2,4 @@ procrastinate==3.10.0
 e2b==2.53.1
 PyYAML==6.0.3
 httpx[socks]==0.28.1
+mcp==1.30.0

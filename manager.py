@@ -922,6 +922,9 @@ class Handler(BaseHTTPRequestHandler):
             elif route == '/v1/tools/search' and self.command == 'POST':
                 from web_tools.discovery import route as tool_search_route
                 tool_search_route(self)
+            elif route.startswith('/v1/mcp/'):
+                from mcp_connector import route as mcp_route
+                mcp_route(self, target)
             elif route == '/v1/files' or route.startswith('/v1/files/'):
                 from web_files import route as file_route
                 file_route(self, target)
@@ -952,11 +955,20 @@ class Handler(BaseHTTPRequestHandler):
         self.manager.check_upstream(os.environ.get("MANAGER_FOLLOW", "master"), True)
 
     def forward(self):
+        policy = self.headers.get('X-WebCC-Model-Policy', 'auto')
+        if policy not in {'auto', 'exact'}:
+            raise Problem(400, 'Unsupported model selection policy')
+        if policy == 'exact':
+            raise Problem(409, 'Exact model selection is not verified for the web-account upstream')
         if self.headers.get('X-WebCC-Runtime'):
             from runtime_api import messages
             messages(self)
             return
         mode = self.headers.get("X-WebCC-Tools")
+        if mode == 'mcp-v1' and self.command == 'POST':
+            from mcp_messages import messages
+            messages(self)
+            return
         if mode:
             if mode != "prompt-v1" or not self.manager.web_tools_enabled or self.command != "POST" or urlsplit(self.path).path != "/v1/messages":
                 self.close_connection = True

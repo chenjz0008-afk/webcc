@@ -95,6 +95,7 @@ def plan(manager, item, inference):
                'messages': item['messages'], 'system': instruction, 'tools': [tool],
                'tool_choice': {'type': 'tool', 'name': 'execute_python', 'disable_parallel_tool_use': True}}
     message = inference(manager, item['owner'], request, 'prompt-v1')
+    item['planner_usage'] = copy.deepcopy(message.get('usage'))
     calls = [b for b in message['content'] if b['type'] == 'tool_use']
     if len(calls) != 1 or calls[0]['name'] != 'execute_python':
         raise FileProblem(502, 'Model did not produce a valid execution plan')
@@ -191,7 +192,7 @@ def process(manager, identity, inference, provider):
                     code, outputs = plan(manager, item, inference)
                     item.update(code=code, outputs=outputs)
                     with store.transaction(identity) as (_, current):
-                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'])
+                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'], planner_usage=item.get('planner_usage'))
                 seconds = item['timeout_seconds']
                 sandbox = provider.create(identity, seconds)
                 with store.transaction(identity) as (_, current):

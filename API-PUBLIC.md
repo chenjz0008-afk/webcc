@@ -35,7 +35,7 @@ Authorization: Bearer <API Key>
 | `claude-sonnet-5` | 标准模式 |
 | `claude-sonnet-4-6` | 标准模式 |
 
-上述范围对应当前网页无需升级的 Haiku 4.5、Sonnet 5 和 Sonnet 4.6。当前免费账号通过原版 ClewdR 调用时，由 Claude.ai 默认模型处理请求；不提供强制选择具体型号或 Thinking 模式的保证。
+上述范围对应当前网页无需升级的 Haiku 4.5、Sonnet 5 和 Sonnet 4.6。当前免费账号通过原版 ClewdR 调用时，由 Claude.ai 默认模型处理请求；不提供强制选择具体型号或 Thinking 模式的保证。要求精确型号时发送 X-WebCC-Model-Policy: exact；当前返回 409，不发送模型请求。默认策略为 auto。
 
 ## 3. 环境变量
 
@@ -437,7 +437,7 @@ curl --fail-with-body -sS --max-time 180 \
   'https://165.154.205.213/v1/runs' \
   -H "x-api-key: $CLEWDR_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"code":"total=37+83\nprint(total)\nopen("output/report.txt","w").write(str(total))","outputs":["report.txt"]}'
+  -d '{"code":"total=37+83\nprint(total)\nopen(\"output/report.txt\",\"w\").write(str(total))","outputs":["report.txt"]}'
 ```
 
 创建返回 202 与运行 ID。GET /v1/runs/{id} 查询 state；ended 时 result.stdout 为程序输出，files 是生成文件列表，使用第 11 节接口下载。上述程序输出和文件内容均为 120。
@@ -473,7 +473,7 @@ POST /v1/runs/{id}/tool_results
 
 提交返回 202，继续查询运行状态。错误结果设置 is_error=true。重复、未知、跨密钥或已取消的结果会被拒绝；批量提交具备事务原子性。
 
-也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，当前只支持非流式；等待工具返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限返回 202，通过 /v1/runs 查询。此模式是平台执行适配，不是官方沙箱协议的完整替代。
+也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。流式内容在结果确认后输出，不包含原生 Thinking 或实时标准输出。此模式是平台执行适配，不是官方沙箱协议的完整替代。
 
 ## 15. Skills
 
@@ -493,3 +493,35 @@ POST /v1/runs/{id}/tool_results
 创建返回 id 和 version。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
 
 每包最多 64 个资源、合计 256 KiB；每项最多 64 KiB。运行依赖需预装在沙箱模板中。这里只管理用户上传的 Skills，不预置第三方 Skill 内容。
+
+
+## 16. 远程 MCP
+
+独立密钥需要 mcp 权限；Messages 还需要 messages 和 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不保存到任务或日志。
+
+| 操作 | 接口 |
+| --- | --- |
+| 工具目录 | POST /v1/mcp/tools，正文包含 server |
+| 直接调用 | POST /v1/mcp/call，正文包含 server、name、arguments |
+| 模型选择并执行 | POST /v1/messages，X-WebCC-Tools: mcp-v1，model=webcc-mcp-v1 |
+
+```bash
+curl --fail-with-body -sS --max-time 180 \
+  'https://165.154.205.213/v1/messages' \
+  -H "x-api-key: $CLEWDR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'X-WebCC-Tools: mcp-v1' \
+  -d '{
+    "model":"webcc-mcp-v1",
+    "max_tokens":2048,
+    "mcp_servers":[{"type":"url","name":"deepwiki","url":"https://mcp.deepwiki.com/mcp"}],
+    "tools":[{"type":"mcp_toolset","mcp_server_name":"deepwiki","default_config":{"enabled":false},"configs":{"read_wiki_structure":{"enabled":true}}}],
+    "messages":[{"role":"user","content":"调用 deepwiki 的 read_wiki_structure 读取 modelcontextprotocol/python-sdk，然后列出前三个文档标题。"}]
+  }'
+```
+
+响应 content 包含 mcp_tool_use、mcp_tool_result 和最终 text。工具真实执行后才提供结果；执行状态无法确认时不自动重放。工具参数经过 JSON Schema 校验。
+
+支持 Bearer authorization_token、default_config.enabled 和 configs.{工具名}.enabled。最多两个服务、32 个启用工具、8 次调用和四轮模型请求；总期限最多 140 秒，每次远程操作最多 30 秒。目录最多 128 KiB，单次工具文本最多 64 KiB。工具目录可用于按需发现；Messages 暂不接受 defer_loading。仅支持 Streamable HTTP 和文本结果。
+
+设置 stream=true 返回 SSE，包含工具参数增量和结果块；内容在结果确认后输出。该接口通过网页模型与平台执行器实现，不提供原生约束采样、Thinking 签名或官方 Connector 的全部扩展。
