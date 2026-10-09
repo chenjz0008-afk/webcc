@@ -60,7 +60,7 @@ class WebGatewayTests(unittest.TestCase):
         self.assertEqual(message['usage'], {'input_tokens': 40, 'output_tokens': 20})
         upstream = json.loads(Worker.seen[-1]['body'])
         self.assertNotIn('tools', upstream)
-        self.assertFalse(upstream['stream'])
+        self.assertTrue(upstream['stream'])
         self.assertNotIn('X-WebCC-Tools', Worker.seen[-1]['headers'])
         self.assert_idle()
 

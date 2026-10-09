@@ -1,0 +1,44 @@
+{
+  "pass": true,
+  "environment": "server isolated PostgreSQL/Redis; official SDK; existing web account; E2B; DeepWiki",
+  "checks": {
+    "official_sdk_files_lifecycle": true,
+    "official_sdk_skills_upload_versions_pagination_download_delete": true,
+    "official_sdk_batch_real_result": true,
+    "real_text_citation_source_location": true,
+    "real_pdf_page_citation": true,
+    "stdout_arrived_before_execution_ended": true,
+    "deferred_mcp_persistent_resume_and_isolation": true,
+    "controlled_authenticated_mcp_connection_reuse": true,
+    "interrupted_mcp_dispatch_not_replayed": true,
+    "failed_mcp_signature_not_replayed": true,
+    "killed_process_execution_lock_released": true
+  },
+  "regression": {
+    "tests": 190,
+    "passed": 190,
+    "skipped": 0,
+    "seconds": 89.5
+  },
+  "timings": {
+    "sandbox_first_stdout_seconds": 9.17
+  },
+  "limits": [
+    "Strict Brave search constraints deferred by user",
+    "Controlled MCP authentication service; public DeepWiki tested separately",
+    "Separate-process shared-state verification; no second physical server",
+    "WebCC adapters do not provide native Thinking signatures or constrained sampling"
+  ],
+  "deployment": {
+    "source_commit": "68262fa",
+    "backup": "/var/backups/webcc/finish-tools-20261009T065838Z",
+    "public_https": true,
+    "public_official_sdk_citation_sse": true,
+    "public_official_sdk_mcp_sse": true,
+    "runtime_hashes_matched": 80,
+    "clewdr_configs_unchanged": 11,
+    "clewdr_images_matched": 11,
+    "clewdr_containers_not_restarted": 11,
+    "temporary_keys_removed": true
+  }
+}

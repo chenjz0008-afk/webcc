@@ -35,7 +35,7 @@ Authorization: Bearer <API Key>
 | `claude-sonnet-5` | 标准模式 |
 | `claude-sonnet-4-6` | 标准模式 |
 
-上述范围对应当前网页无需升级的 Haiku 4.5、Sonnet 5 和 Sonnet 4.6。当前免费账号通过原版 ClewdR 调用时，由 Claude.ai 默认模型处理请求；不提供强制选择具体型号或 Thinking 模式的保证。
+上述范围对应当前网页无需升级的 Haiku 4.5、Sonnet 5 和 Sonnet 4.6。当前免费账号通过原版 ClewdR 调用时，由 Claude.ai 默认模型处理请求；不提供强制选择具体型号或 Thinking 模式的保证。要求精确型号时发送 X-WebCC-Model-Policy: exact；当前返回 409，不发送模型请求。默认策略为 auto。
 
 ## 3. 环境变量
 
@@ -190,18 +190,20 @@ print(content)
 |---|---|
 | 地址 | `https://165.154.205.213/v1/messages` |
 | 鉴权 | `Authorization: Bearer <API Key>` 或 `x-api-key` |
-| 请求头 | `X-WebCC-Tools: prompt-v1` |
-| `model` | `webcc-prompt-v1` |
-| `max_tokens` | 16—8192，示例使用 1024 |
+| 请求头 | `Content-Type: application/json`；无需专用工具请求头 |
+| `model` | 第 4 节中的模型名，例如 `claude-sonnet-4-6` |
+| `max_tokens` | 正整数，示例使用 1024；实际输出受上游限制 |
 | `tools` | 1—64 个工具，包含 `name`、可选 `description` 和 `input_schema` |
 | `strict` | 工具定义中的可选布尔值，参数采用本地 Schema 校验 |
 | `messages` | 交替的 user / assistant 消息；支持文本、tool_use、文本 tool_result |
-| `system` | 可选文本 |
+| `system` | 可选文本或文本内容块数组 |
 | `stream` | `false` 返回 JSON；`true` 返回 SSE |
 
-可使用平台全局密钥。独立密钥需具备 `messages` 和 `experimental_tools` 权限。
+可使用平台全局密钥。独立密钥需具备 `messages` 权限。
 
-`webcc-prompt-v1` 是网页工具适配标识，不对应保证可选的具体 Claude 型号。所有返回参数均经过本地 JSON Schema 校验；`strict=true` 不提供官方约束采样。响应头以 `X-WebCC-Adapter` 标明该策略。
+标准客户端工具请求自动采用 WebCC 工具适配。返回参数经过本地 JSON Schema 校验；`strict=true` 表示参数校验，不提供官方约束采样。响应头 `X-WebCC-Adapter: standard-tools-v1` 标明该策略。原有 `webcc-prompt-v1` 与专用请求头仍可使用，独立密钥需额外具备 `experimental_tools` 权限。
+
+Thinking、effort、Beta 等请求控制保留，上游返回的 Thinking 与签名保留原值。`cache_control` 可随请求传递，网页上游的实际缓存效果尚未确认。响应 `model` 记录上游返回值，无法取得时为 `unknown`。
 
 ### 9.2 支持范围
 
@@ -227,10 +229,9 @@ print(content)
 curl --fail-with-body --silent --show-error --max-time 180 \
   'https://165.154.205.213/v1/messages' \
   -H "Authorization: Bearer $CLEWDR_API_KEY" \
-  -H 'X-WebCC-Tools: prompt-v1' \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "webcc-prompt-v1",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 1024,
     "stream": false,
     "tools": [{
@@ -282,15 +283,14 @@ history = [{"role": "user", "content": "读取文档 A，收到结果后只回�
 
 def send(choice):
     payload = {
-        "model": "webcc-prompt-v1", "max_tokens": 1024,
+        "model": "claude-sonnet-4-6", "max_tokens": 1024,
         "stream": False, "tools": tools,
         "tool_choice": choice, "messages": history,
     }
     request = urllib.request.Request(
         URL, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": "Bearer " + KEY,
-                 "Content-Type": "application/json",
-                 "X-WebCC-Tools": "prompt-v1"},
+                 "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=180) as response:
         return json.load(response)
@@ -437,7 +437,7 @@ curl --fail-with-body -sS --max-time 180 \
   'https://165.154.205.213/v1/runs' \
   -H "x-api-key: $CLEWDR_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"code":"total=37+83\nprint(total)\nopen("output/report.txt","w").write(str(total))","outputs":["report.txt"]}'
+  -d '{"code":"total=37+83\nprint(total)\nopen(\"output/report.txt\",\"w\").write(str(total))","outputs":["report.txt"]}'
 ```
 
 创建返回 202 与运行 ID。GET /v1/runs/{id} 查询 state；ended 时 result.stdout 为程序输出，files 是生成文件列表，使用第 11 节接口下载。上述程序输出和文件内容均为 120。
@@ -473,11 +473,11 @@ POST /v1/runs/{id}/tool_results
 
 提交返回 202，继续查询运行状态。错误结果设置 is_error=true。重复、未知、跨密钥或已取消的结果会被拒绝；批量提交具备事务原子性。
 
-也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，当前只支持非流式；等待工具返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限返回 202，通过 /v1/runs 查询。此模式是平台执行适配，不是官方沙箱协议的完整替代。
+也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。程序执行期间通过 text_delta 输出真实 stdout，随后返回 code_execution_tool_result。模型规划和参数校验完成后才返回工具参数，不提供原生 Thinking。此模式是平台执行适配，不是官方沙箱协议的完整替代。
 
 ## 15. Skills
 
-独立密钥需要 skills 权限。上传采用 JSON files 映射，包含标准 SKILL.md 和 UTF-8 文本资源。
+独立密钥需要 skills 权限。支持原有 JSON files 映射，以及官方 Python SDK 的 multipart files[] 上传。SDK 上传的所有文件须位于同一个顶层目录，包含 SKILL.md 和 UTF-8 文本资源。
 
 | 操作 | 接口 |
 | --- | --- |
@@ -485,11 +485,85 @@ POST /v1/runs/{id}/tool_results
 | 查询 / 删除 | GET / DELETE /v1/skills/{id} |
 | 新版本 | POST /v1/skills/{id}/versions |
 | 查询 / 删除指定版本 | GET / DELETE /v1/skills/{id}/versions/{version} |
+| 下载版本 ZIP | GET /v1/skills/{id}/versions/{version}/content |
 
 ```json
 {"files":{"SKILL.md":"---\nname: total-report\ndescription: Calculate a total\n---\nRun scripts/total.py.","scripts/total.py":"print(37+83)"}}
 ```
 
-创建返回 id 和 version。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
+JSON 创建返回 id 和 version；SDK 创建返回 latest_version_id。版本查询支持 latest，列表使用 limit、page 与 next_page 分页。接受 SDK 的 beta=true 查询参数。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
 
 每包最多 64 个资源、合计 256 KiB；每项最多 64 KiB。运行依赖需预装在沙箱模板中。这里只管理用户上传的 Skills，不预置第三方 Skill 内容。
+
+
+## 16. 远程 MCP
+
+独立密钥需要 mcp 权限；Messages 还需要 messages 和 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不写入日志。同步请求结束后关闭连接；持久任务的认证参数加密保存，任务结束、取消或结果未知时删除。更换平台管理密钥后，已有持久任务的认证参数无法解密。
+
+| 操作 | 接口 |
+| --- | --- |
+| 工具目录 | POST /v1/mcp/tools，正文包含 server |
+| 直接调用 | POST /v1/mcp/call，正文包含 server、name、arguments |
+| 模型选择并执行 | POST /v1/messages，X-WebCC-Tools: mcp-v1，model=webcc-mcp-v1 |
+
+```bash
+curl --fail-with-body -sS --max-time 180 \
+  'https://165.154.205.213/v1/messages' \
+  -H "x-api-key: $CLEWDR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'X-WebCC-Tools: mcp-v1' \
+  -d '{
+    "model":"webcc-mcp-v1",
+    "max_tokens":2048,
+    "mcp_servers":[{"type":"url","name":"deepwiki","url":"https://mcp.deepwiki.com/mcp"}],
+    "tools":[{"type":"mcp_toolset","mcp_server_name":"deepwiki","default_config":{"enabled":false},"configs":{"read_wiki_structure":{"enabled":true}}}],
+    "messages":[{"role":"user","content":"调用 deepwiki 的 read_wiki_structure 读取 modelcontextprotocol/python-sdk，然后列出前三个文档标题。"}]
+  }'
+```
+
+响应 content 包含 mcp_tool_use、mcp_tool_result 和最终 text。工具真实执行后才提供结果；执行状态无法确认时不自动重放。工具参数经过 JSON Schema 校验。
+
+支持 Bearer authorization_token、default_config.enabled、configs.{工具名}.enabled 和 defer_loading。延迟加载的工具通过 webcc_tool_search 发现，返回 tool_search_tool_result 与 tool_reference。连接和目录在同一请求内复用，认证参数不跨调用者共享。仅支持 Streamable HTTP 和文本结果。
+
+同步模式最多两个服务、32 个启用工具、8 次调用和四轮模型请求；总期限最多 140 秒。连接初始化最多 20 秒，后续单次远程操作最多 30 秒。目录最多 128 KiB，单次工具文本最多 64 KiB。
+
+设置 stream=true 返回 SSE，模型规划通过校验后发送工具参数，远程执行返回后立即发送结果块。参数不会在校验前交给客户端执行。该接口通过网页模型与平台执行器实现，不提供原生约束采样、Thinking 签名或官方 Connector 的全部扩展。
+
+
+### 16.1 持久暂停与恢复
+
+首次请求加入 max_iterations（1—4，默认 3）启用持久模式。达到本轮预算后返回 stop_reason=pause_turn 与 container.id。整个会话最多 16 轮、32 次工具调用，有效期 600 秒。
+
+| 操作 | 接口 |
+| --- | --- |
+| 查询状态与当前结果 | GET /v1/mcp/sessions/{id} |
+| 恢复 waiting 会话 | POST /v1/mcp/sessions/{id}/resume |
+| 取消 | POST /v1/mcp/sessions/{id}/cancel |
+| 删除已终止会话 | DELETE /v1/mcp/sessions/{id} |
+
+也可通过 Messages 恢复：
+
+```json
+{"model":"webcc-mcp-v1","container":"实际 container.id","stream":true}
+```
+
+恢复请求使用 X-WebCC-Tools: mcp-v1，继续已有历史，仅返回本轮新增内容。会话仍在 processing 时先查询状态，不能重复恢复。远程执行中断且结果无法确定时，状态为 unknown，不自动重放，也不允许恢复；由调用方核对外部资源。跨密钥访问返回 404。
+
+## 17. 文档定位引用
+
+POST /v1/messages 使用 X-WebCC-Tools: citations-v1 与 model=webcc-citations-v1。接受 UTF-8 文本文档、内联 base64 PDF，以及所属密钥的 file_id；文档需启用 citations.enabled。独立密钥需要 messages 和 experimental_tools 权限；引用文件还需 files 权限。
+
+```json
+{
+  "model":"webcc-citations-v1",
+  "max_tokens":2048,
+  "messages":[{"role":"user","content":[
+    {"type":"document","title":"预算","source":{"type":"text","data":"北区预算为37。\n南区预算为83。"},"citations":{"enabled":true}},
+    {"type":"text","text":"北区预算是多少？引用原文。"}
+  ]}]
+}
+```
+
+文本引用返回 char_location，字符索引从 0 开始，结束索引不包含在引用内。PDF 返回 page_location，页码从 1 开始，结束页码不包含在引用内。每段引用须与指定文档、指定页面原文逐字匹配；无法验证的结果返回 502。stream=true 返回文本及 citations_delta，校验完成后才输出。
+
+每次最多 8 份文档；PDF 单文件最多 20 MiB、20 页，提取文本最多 64 KiB。不支持加密 PDF、扫描件 OCR 或其他工具策略混用。这是平台定位与校验的引用，不包含官方签名或加密来源信息。

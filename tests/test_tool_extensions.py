@@ -64,5 +64,24 @@ class ExtensionTests(unittest.TestCase):
             check_tools([tool])
 
 
+class ComplexOutputTests(unittest.TestCase):
+    def test_recursive_discriminated_document_schema(self):
+        schema = {'type': 'object', 'properties': {'root': {'$ref': '#/$defs/node'}}, 'required': ['root'],
+            'additionalProperties': False, '$defs': {'node': {'oneOf': [
+                {'type': 'object', 'properties': {'kind': {'const': 'text'}, 'value': {'type': 'string', 'minLength': 1}},
+                 'required': ['kind', 'value'], 'additionalProperties': False},
+                {'type': 'object', 'properties': {'kind': {'const': 'section'}, 'children': {'type': 'array', 'minItems': 1,
+                 'maxItems': 3, 'items': {'$ref': '#/$defs/node'}}}, 'required': ['kind', 'children'], 'additionalProperties': False}]}}}
+        payload, _ = prepare(json.dumps(request(output_config={'format': {'type': 'json_schema', 'schema': schema}})))
+        valid = {'root': {'kind': 'section', 'children': [{'kind': 'text', 'value': 'Actual document'}]}}
+        self.assertEqual(json.loads(complete(reply(json.dumps(valid)), payload)['content'][0]['text']), valid)
+        for invalid in ({'root': {'kind': 'section', 'children': []}},
+                        {'root': {'kind': 'text', 'value': '', 'children': []}},
+                        {'root': {'kind': 'section', 'children': [{'kind': 'unknown'}]}},
+                        {'root': {'kind': 'text', 'value': 'x'}, 'secret': 'unexpected'}):
+            with self.assertRaises(OutputProblem):
+                complete(reply(json.dumps(invalid)), payload)
+
+
 if __name__ == '__main__':
     unittest.main()

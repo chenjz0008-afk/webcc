@@ -16,6 +16,7 @@ def maintain(manager):
     while True:
         time.sleep(30)
         try:
+            manager.files.prune()
             with manager.cluster.pool.connection() as db:
                 db.execute("SELECT pg_advisory_xact_lock(hashtextextended('webcc:runtime-reconcile',0))")
                 rows = db.execute('''SELECT id FROM webcc_tasks t WHERE
@@ -49,6 +50,9 @@ def process(handler):
     if item['kind'] == 'batch':
         from batch_tasks import process as batch_process
         batch_process(manager, item['id'], infer)
+    elif item['kind'] == 'mcp':
+        from mcp_tasks import process as mcp_process
+        mcp_process(manager, item['id'], infer)
     else:
         from e2b_runtime import E2BRuntime
         from run_tasks import process as run_process
@@ -80,7 +84,11 @@ def route(handler, target):
     if not manager.tasks:
         raise FileProblem(503, 'Runtime requires PostgreSQL and the runtime feature flag')
     if kind == 'skills':
-        skill_route(handler, target, owner)
+        if target.query or handler.command in {'GET', 'DELETE'} or handler.headers.get('anthropic-beta') or handler.headers.get('Content-Type', '').startswith('multipart/form-data'):
+            from skill_api import route as sdk_skill_route
+            sdk_skill_route(handler, target, owner)
+        else:
+            skill_route(handler, target, owner)
         return
     base = '/v1/runs'
     if target.path == base:
@@ -158,10 +166,10 @@ def messages(handler):
     manager, owner = handler.manager, handler.caller_key or 'platform'
     if not manager.tasks:
         raise FileProblem(503, 'Runtime is disabled')
-    handler.adapter = 'e2b-runtime-v1; web-account; buffered'
+    handler.adapter = 'e2b-runtime-v1; web-account; stdout-progress'
     fields = json.loads(handler.body(1048576))
-    if not isinstance(fields, dict) or fields.get('model') != 'webcc-runtime-v1' or fields.get('stream', False) is not False or set(fields) - {'model', 'messages', 'tools', 'container', 'max_tokens', 'stream'}:
-        raise FileProblem(400, 'Use webcc-runtime-v1 with stream=false and supported runtime fields')
+    if not isinstance(fields, dict) or fields.get('model') != 'webcc-runtime-v1' or type(fields.get('stream', False)) is not bool or set(fields) - {'model', 'messages', 'tools', 'container', 'max_tokens', 'stream'}:
+        raise FileProblem(400, 'Use webcc-runtime-v1 with supported runtime fields')
     container = fields.get('container')
     if isinstance(container, str):
         check_permissions(handler, {'messages': []})
@@ -191,18 +199,70 @@ def messages(handler):
         check_permissions(handler, request)
         body = validate(request, manager, owner)
         item = manager.tasks.create('run', owner, body, enqueue, body['timeout_seconds'])
+    from message_stream import Stream
+    stream = Stream(handler) if fields.get('stream') else None
+    try:
+        if stream:
+            stream.start()
+            stream.begin({'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'webcc-runtime-v1',
+                          'container': {'id': item['id'], 'expires_at': __import__('web_files').stamp(item['expires'])},
+                          'usage': item.get('planner_usage') or {'input_tokens': 0, 'output_tokens': 0}})
+        finish_message(handler, item, owner, stream)
+    except Exception:
+        if stream and stream.started:
+            try:
+                manager.tasks.cancel(item['id'], owner)
+                with manager.tasks.transaction(item['id'], owner) as (db, _):
+                    enqueue(db, item['id'])
+            except Exception as error:
+                print('runtime_cancel_failed', type(error).__name__, flush=True)
+            from manager import ClientGone
+            try:
+                stream.error('Runtime interrupted; task cancellation requested')
+            except (OSError, ClientGone):
+                handler.close_connection = True
+            return
+        raise
+
+
+def finish_message(handler, item, owner, stream=None):
+    manager = handler.manager
     deadline = time.monotonic() + min(140, manager.request_seconds)
+    emitted_code, emitted_stdout = False, ''
+    tool_id = 'srvtoolu_' + item['id'].removeprefix('run_webcc_')
+    def progress():
+        nonlocal emitted_code, emitted_stdout
+        if not stream:
+            return
+        if not emitted_code and item.get('code') is not None:
+            stream.block({'type': 'server_tool_use', 'id': tool_id, 'name': 'code_execution', 'input': {'code': item['code']}})
+            emitted_code = True
+        stdout = (item.get('result') or item.get('progress') or {}).get('stdout', '')
+        if not stdout.startswith(emitted_stdout):
+            raise FileProblem(502, 'Sandbox progress changed unexpectedly')
+        if emitted_code and len(stdout) > len(emitted_stdout):
+            stream.text(stdout[len(emitted_stdout):])
+            emitted_stdout = stdout
     while item['state'] not in TERMINAL | {'waiting'} and time.monotonic() < deadline:
         handler.check_caller()
+        if stream:
+            stream.check()
+            progress()
         time.sleep(.2)
         item = manager.tasks.get(item['id'], owner)
+    progress()
     if item['state'] not in TERMINAL | {'waiting'}:
-        handler.respond(202, public_run(item))
+        if stream:
+            stream.finish('pause_turn', item.get('planner_usage'))
+        else:
+            handler.respond(202, public_run(item))
         return
     if item['state'] != 'ended' and item['state'] != 'waiting':
+        if stream:
+            stream.error('Runtime task ' + item['state'])
+            return
         handler.respond(502, {'error': {'type': 'api_error', 'message': 'Runtime task ' + item['state']}, 'container': {'id': item['id']}, 'details': item.get('error')})
         return
-    tool_id = 'srvtoolu_' + item['id'].removeprefix('run_webcc_')
     content = [{'type': 'server_tool_use', 'id': tool_id, 'name': 'code_execution', 'input': {'code': item.get('code', '')}}]
     if item['state'] == 'waiting':
         content.extend(item['pending_tools'])
@@ -212,6 +272,15 @@ def messages(handler):
                         'content': {'type': 'code_execution_result', 'stdout': result['stdout'], 'stderr': result['stderr'], 'return_code': 0,
                                     'content': [{'type': 'code_execution_output', 'file_id': f['id']} for f in item.get('output_files', [])]}})
         content.append({'type': 'text', 'text': result['stdout'].strip() or 'Execution completed.'})
-    handler.respond(200, {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'webcc-runtime-v1',
+    message = {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'webcc-runtime-v1',
                          'container': {'id': item['id'], 'expires_at': __import__('web_files').stamp(item['expires'])},
-                         'content': content, 'stop_reason': 'tool_use' if item['state'] == 'waiting' else 'end_turn', 'stop_sequence': None})
+                         'content': content, 'stop_reason': 'tool_use' if item['state'] == 'waiting' else 'end_turn', 'stop_sequence': None,
+                         **({'usage': item['planner_usage']} if item.get('planner_usage') else {})}
+    if stream:
+        for block in content[1:]:
+            if block['type'] == 'text' and emitted_stdout:
+                continue
+            stream.block(block)
+        stream.finish(message['stop_reason'], item.get('planner_usage'))
+    else:
+        handler.respond(200, message)

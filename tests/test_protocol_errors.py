@@ -41,6 +41,14 @@ class ProtocolErrorTests(unittest.TestCase):
         self.check(status, headers, body, 'request_too_large')
         self.assertEqual(base.Worker.seen, [])
 
+    def test_exact_model_rejected_without_dispatch_or_quarantine(self):
+        status, _, body = self.request('POST', '/v1/messages', self.payload(), extra={'X-WebCC-Model-Policy': 'exact'})
+        self.assertEqual(status, 409)
+        self.assertIn(b'Exact model selection', body)
+        self.assertEqual(base.Worker.seen, [])
+        self.assertEqual(self.manager.get_account(self.identity)['status'], 'ready')
+        self.assert_idle()
+
     def test_upstream_failure_and_rate_limit_are_sanitized(self):
         account = self.manager.get_account(self.identity)
         for code, kind in [(500, 'api_error'), (429, 'rate_limit_error')]:

@@ -36,8 +36,15 @@ class CapturedHandler(Handler):
         self.response = status, json.loads(data) if isinstance(data, bytes) else data
 
 
-def infer(manager, owner, params, mode=None):
+def infer(manager, owner, params, mode=None, deadline=None, on_check=None):
     handler = CapturedHandler(manager, owner, params, mode)
+    handler.outer_deadline = deadline
+    if on_check:
+        original = handler.check_caller
+        def checked():
+            original()
+            on_check()
+        handler.check_caller = checked
     manager.background.enabled = True
     try:
         handler.forward()

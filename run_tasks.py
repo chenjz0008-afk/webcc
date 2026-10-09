@@ -95,6 +95,7 @@ def plan(manager, item, inference):
                'messages': item['messages'], 'system': instruction, 'tools': [tool],
                'tool_choice': {'type': 'tool', 'name': 'execute_python', 'disable_parallel_tool_use': True}}
     message = inference(manager, item['owner'], request, 'prompt-v1')
+    item['planner_usage'] = copy.deepcopy(message.get('usage'))
     calls = [b for b in message['content'] if b['type'] == 'tool_use']
     if len(calls) != 1 or calls[0]['name'] != 'execute_python':
         raise FileProblem(502, 'Model did not produce a valid execution plan')
@@ -191,7 +192,7 @@ def process(manager, identity, inference, provider):
                     code, outputs = plan(manager, item, inference)
                     item.update(code=code, outputs=outputs)
                     with store.transaction(identity) as (_, current):
-                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'])
+                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'], planner_usage=item.get('planner_usage'))
                 seconds = item['timeout_seconds']
                 sandbox = provider.create(identity, seconds)
                 with store.transaction(identity) as (_, current):
@@ -218,7 +219,19 @@ def process(manager, identity, inference, provider):
                     provider.deliver(sandbox, call_id, {k: value[k] for k in ('content', 'is_error')})
                     with store.transaction(identity) as (_, current):
                         current['delivered'][call_id]['written'] = True
-            done = provider.read_json(sandbox, 'done.json')
+            if hasattr(provider, 'poll'):
+                update = provider.poll(sandbox)
+                done, calls = update['done'], update['calls']
+                progress = update.get('progress')
+                if progress is not None:
+                    if not isinstance(progress, dict) or set(progress) != {'stdout', 'stderr'} or any(not isinstance(v, str) or len(v) > 16384 for v in progress.values()):
+                        raise FileProblem(502, 'Invalid sandbox progress')
+                    with store.transaction(identity) as (_, current):
+                        current['progress'] = progress
+            else:
+                done, calls = provider.read_json(sandbox, 'done.json'), provider.pending(sandbox)
+            if not isinstance(calls, list) or len(calls) > 32:
+                raise FileProblem(502, 'Sandbox pending tools exceed limits')
             if done is not None:
                 if not isinstance(done, dict) or set(done) != {'stdout', 'stderr', 'error'} or any(not isinstance(done[k], str) or len(done[k]) > 16384 for k in ('stdout', 'stderr')):
                     raise FileProblem(502, 'Invalid sandbox execution result')
@@ -242,7 +255,6 @@ def process(manager, identity, inference, provider):
                     if not cleaned:
                         enqueue(db, identity, 30)
                 return
-            calls = provider.pending(sandbox)
             tools = {t['name']: t for t in item['tools']}
             pending, seen = [], set()
             for call in calls:

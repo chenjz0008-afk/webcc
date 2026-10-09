@@ -3,6 +3,7 @@ import copy
 import json
 import re
 import time
+from urllib.parse import parse_qs, urlencode
 from web_files import FileProblem
 from runtime_queue import enqueue
 from task_store import public_batch
@@ -98,6 +99,11 @@ def route(handler, target):
         raise FileProblem(503, 'Batches require the PostgreSQL runtime')
     base = '/v1/messages/batches'
     path = target.path
+    params = parse_qs(target.query, keep_blank_values=True, max_num_fields=5)
+    if 'beta' in params:
+        if params.pop('beta') != ['true']:
+            raise FileProblem(400, 'Invalid beta selector')
+        target = target._replace(query=urlencode(params, doseq=True))
     if path == base:
         if handler.command == 'POST':
             if target.query or handler.headers.get('anthropic-beta'):
@@ -131,7 +137,8 @@ def route(handler, target):
         handler.respond(200, raw, 'application/x-jsonl')
         return
     elif not action and handler.command == 'DELETE':
-        handler.respond(200, manager.tasks.delete(identity, owner))
+        manager.tasks.delete(identity, owner)
+        handler.respond(200, {'id': identity, 'type': 'message_batch_deleted'})
         return
     elif action or handler.command != 'GET':
         raise FileProblem(405, 'Unsupported method')

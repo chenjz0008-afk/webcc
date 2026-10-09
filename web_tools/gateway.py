@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from manager import ClientGone, Problem
+from api_keys import KeyProblem
 from jsonschema.exceptions import ValidationError, SchemaError, RefResolutionError
 from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
@@ -16,7 +17,7 @@ from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
 MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
 
 
-def forward(handler):
+def forward(handler, raw=None, standard=False):
     admitted = False
 
     def admit():
@@ -27,19 +28,22 @@ def forward(handler):
             admitted = True
 
     try:
-        _forward(handler, admit)
+        _forward(handler, admit, raw, standard)
     finally:
         if admitted:
             MEDIA_SLOTS.release()
 
 
-def _forward(handler, admit):
-    handler.adapter = 'prompt-v1; schema-validated; no-native-strict; buffered'
+def _forward(handler, admit, raw=None, standard=False):
+    handler.adapter = ('standard-tools-v1' if standard else 'prompt-v1') + '; schema-validated; no-native-strict; buffered'
     handler.request_id = uuid.uuid4().hex
     handler.request_deadline = time.monotonic() + handler.manager.request_seconds
+    if getattr(handler, 'outer_deadline', None):
+        handler.request_deadline = min(handler.request_deadline, handler.outer_deadline)
     sent = False
 
     def alive():
+        handler.check_caller()
         if select.select([handler.connection], [], [], 0)[0]:
             if not handler.connection.recv(1, socket.MSG_PEEK):
                 raise ClientGone()
@@ -58,11 +62,13 @@ def _forward(handler, admit):
             handler.respond(status, {'type': 'error', 'error': detail, 'request_id': handler.request_id})
 
     try:
-        if handler.headers.get('anthropic-beta') or handler.path != '/v1/messages':
+        from urllib.parse import urlsplit
+        if (not standard and handler.headers.get('anthropic-beta')) or urlsplit(handler.path).path != '/v1/messages' or not standard and handler.path != '/v1/messages':
             raise ValueError('Beta and query parameters are unsupported in prompt-v1')
         if int(handler.headers.get('Content-Length', '0')) > 131072:
             admit()
-        request, body = prepare(handler.body(TOOL_REQUEST_MAX), handler.manager.files, handler.caller_key or 'platform', on_media=admit)
+        request, body = prepare(raw if raw is not None else handler.body(TOOL_REQUEST_MAX), handler.manager.files,
+                                handler.caller_key or 'platform', on_media=admit, standard=standard)
     except FileProblem as problem:
         handler.retry_after = problem.retry_after
         handler.close_connection = True
@@ -99,17 +105,18 @@ def _forward(handler, admit):
             try:
                 if cancelled.is_set():
                     return
-                connection.request('POST', '/v1/messages', body, {'Authorization': 'Bearer ' + account['key'],
-                    'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'Accept-Encoding': 'identity'})
+                from node_transport import semantic_headers
+                headers = semantic_headers(handler.headers) if standard else {}
+                connection.request('POST', handler.path if standard else '/v1/messages', body, {'content-type': 'application/json',
+                    'anthropic-version': '2023-06-01', **headers, 'Authorization': 'Bearer ' + account['key'], 'Accept-Encoding': 'identity'})
                 transport['socket'] = connection.sock
                 if cancelled.is_set():
                     return
                 response = connection.getresponse()
                 result.update(status=response.status, retry_after=response.getheader('Retry-After'),
                               node_error=response.getheader('X-WebCC-Node-Error') == '1')
-                raw = response.read(1048577)
-                if len(raw) > 1048576 or response.length not in (None, 0):
-                    raise ValueError('Invalid upstream size')
+                from upstream_message import read
+                raw = read(response, thinking=standard)
                 result['body'] = raw
             except Exception as exc:
                 result['failure'] = type(exc).__name__
@@ -144,7 +151,7 @@ def _forward(handler, admit):
                 if sent and time.monotonic() - heartbeat >= 5:
                     chunk(b'event: ping\ndata: {"type":"ping"}\n\n')
                     heartbeat = time.monotonic()
-        except (ClientGone, OSError) as exc:
+        except (ClientGone, OSError, KeyProblem) as exc:
             cancelled.set()
             if transport.get('socket'):
                 try:
@@ -152,7 +159,9 @@ def _forward(handler, admit):
                 except OSError:
                     pass
             done.wait(1)
-            if isinstance(exc, TimeoutError):
+            if isinstance(exc, KeyProblem):
+                error(exc.status, 'permission_error' if exc.status == 403 else 'authentication_error', 'Caller permission was revoked')
+            elif isinstance(exc, TimeoutError):
                 error(504, 'api_error', 'Experimental request deadline exceeded', 'request_timeout')
             else:
                 handler.close_connection = True
@@ -162,6 +171,9 @@ def _forward(handler, admit):
             last = (503, 'api_error', 'Worker node unavailable')
             continue
         if result.get('failure'):
+            if result['failure'] == 'UnexpectedTool':
+                last = (502, 'api_error', 'Unexpected server tool execution; request was not replayed', 'unexpected_server_tool')
+                break
             status = 504 if result['failure'] == 'TimeoutError' else 502
             last = (status, 'api_error', 'Experimental upstream connection failed')
         elif status >= 400:
