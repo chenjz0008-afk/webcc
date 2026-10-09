@@ -95,7 +95,7 @@ class ClusterState:
                 db.execute('SELECT pg_advisory_unlock(hashtextextended(%s,0))', (name,))
                 db.commit()
 
-    def reserve(self, account_id, node_id, capacity, statuses=('ready',)):
+    def reserve(self, account_id, node_id, capacity, statuses=('ready',), background=False):
         if not statuses or set(statuses) - {'ready', 'updating'}:
             raise ValueError('Unsupported reservation state')
         token = secrets.token_hex(24)
@@ -108,7 +108,8 @@ class ClusterState:
             row = db.execute("SELECT body FROM webcc_entities WHERE kind='accounts' AND id=%s FOR UPDATE", (account_id,)).fetchone()
             if not row or row[0].get('status') not in statuses:
                 return None
-            if db.execute('SELECT count(*) FROM webcc_occupancy').fetchone()[0] >= capacity:
+            limit = max(1, capacity - 1) if background else capacity
+            if db.execute('SELECT count(*) FROM webcc_occupancy').fetchone()[0] >= limit:
                 return None
             inserted = db.execute('INSERT INTO webcc_occupancy(account_id,token,node_id) VALUES (%s,%s,%s) ON CONFLICT(account_id) DO NOTHING RETURNING token', (account_id, token, node_id)).fetchone()
             return inserted[0] if inserted else None

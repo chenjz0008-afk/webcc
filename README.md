@@ -6,6 +6,8 @@ WebCC 是一个用于管理多个 Claude 网页账号的后台和 API 网关。�
 
 本仓库从 2026 年 10 月 6 日服务器正在运行的项目导出。包含后端、前端源码、当时部署的静态页面、测试和部署配置。账号库、登录密码、sessionKey、代理凭据、证书私钥和历史备份保留在服务器，不进入 Git。
 
+持久批量任务、E2B 执行、Skills 与程序化工具调用见 [持久任务架构](docs/DURABLE-RUNTIME.md)，对外接口见 [API 文档](API-PUBLIC.md)。
+
 完整工具流程的模块边界、网页内置能力和后续验收见 [工具能力架构](docs/TOOL-CAPABILITY-ARCHITECTURE.md)。
 
 ## 架构
@@ -20,11 +22,15 @@ flowchart TD
     Manager --> WorkerB[官方 ClewdR · 账号 B]
     WorkerA --> ProxyA[账号 A 的代理]
     WorkerB --> ProxyB[账号 B 的代理]
+    Store --> Tasks[Procrastinate Worker]
+    Tasks --> Manager
+    Manager --> E2BProxy[E2B 专用代理]
+    E2BProxy --> E2B[E2B 沙箱 · 禁止对外联网]
     ProxyA --> Claude[Claude 上游]
     ProxyB --> Claude
 ```
 
-后端使用 Python 标准库，通过 Docker CLI 管理容器。前端使用 React、MUI 和 Vite。Nginx 提供 HTTPS，并将页面、管理接口和模型请求转发给 WebCC。账号容器使用随机本地端口，只有网关入口对外提供服务。
+后端使用 Python，通过 Docker CLI 管理账号容器；持久任务采用 PostgreSQL 与 Procrastinate，执行环境使用 E2B 官方 SDK。前端使用 React、MUI 和 Vite。Nginx 提供 HTTPS，并将页面、管理接口和模型请求转发给 WebCC。账号容器使用随机本地端口，只有网关入口对外提供服务。
 
 2026-10-08 生产已切换到 PostgreSQL 和 Redis。文件按当前部署选择保存为 BYTEA。中心调度保存持久占用，进程重启不会自动释放未确认结束的任务。节点 Agent 使用 Starlette、HTTPX 和 Uvicorn，目前在隔离环境验收，尚未启用跨服务器生产路由。迁移步骤见 [迁移与恢复](docs/POSTGRESQL-MIGRATION.md)，扩容边界见 [多服务器架构](docs/MULTI-SERVER-ARCHITECTURE.md)。
 

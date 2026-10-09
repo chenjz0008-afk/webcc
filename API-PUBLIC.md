@@ -1,6 +1,6 @@
 # WebCC API 接入说明
 
-文档版本：2026-10-08
+文档版本：2026-10-09
 
 ## 1. 连接配置
 
@@ -405,3 +405,91 @@ curl --fail-with-body -sS -N --max-time 180 \
 ```
 
 图片将 type 改为 image。普通 Messages 可引用文件；附件与客户端工具混用时使用第 9 节配置。
+
+
+## 12. 异步批量任务
+
+独立密钥需要 batches 和 messages 权限。每批 1—100 项，custom_id 唯一；请求体最多 1 MiB，文件引用展开后最多 8 MiB，任务期限 24 小时。后台逐项处理，不提供官方批处理折扣。
+
+| 操作 | 接口 |
+| --- | --- |
+| 创建 / 列表 | POST / GET /v1/messages/batches |
+| 查询 / 删除 | GET / DELETE /v1/messages/batches/{id} |
+| 取消未执行项 | POST /v1/messages/batches/{id}/cancel |
+| 下载 JSONL 结果 | GET /v1/messages/batches/{id}/results |
+
+```bash
+curl --fail-with-body -sS --max-time 180 \
+  'https://165.154.205.213/v1/messages/batches' \
+  -H "x-api-key: $CLEWDR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"requests":[{"custom_id":"sum","params":{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"Add 37 and 83. Reply only 120."}]}}]}'
+```
+
+创建返回批次 ID。查询 processing_status 为 ended 后下载 results_url；每行包含 custom_id 与 succeeded、errored、canceled 或 expired 结果。结果未完成返回 409。已发出的模型请求不因取消而重放。
+
+## 13. 代码执行与生成文件
+
+独立密钥需要 runs 权限；输入或生成文件需要 files 权限。代码仅在 E2B 执行，默认禁止联网，任务期限为 30—600 秒，默认 300 秒。
+
+```bash
+curl --fail-with-body -sS --max-time 180 \
+  'https://165.154.205.213/v1/runs' \
+  -H "x-api-key: $CLEWDR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"total=37+83\nprint(total)\nopen("output/report.txt","w").write(str(total))","outputs":["report.txt"]}'
+```
+
+创建返回 202 与运行 ID。GET /v1/runs/{id} 查询 state；ended 时 result.stdout 为程序输出，files 是生成文件列表，使用第 11 节接口下载。上述程序输出和文件内容均为 120。
+
+POST /v1/runs/{id}/cancel 取消并清理执行环境。DELETE /v1/runs/{id} 仅删除已终止且清理完成的任务记录；生成文件独立删除。无法确定执行结果时返回 unknown，不自动重新运行代码。
+
+## 14. 程序化工具调用
+
+/v1/runs 的 code_execution_type 默认 code_execution_20260120，可设为 code_execution_20260521；tools.allowed_callers 必须允许所选版本。
+
+在 /v1/runs 声明 tools 后，Python 程序可 await 工具名({...})；返回值为客户端提交的字符串。支持 asyncio.gather 并行调用，每轮最多 8 个执行中的调用、单次程序最多 32 次工具调用。
+
+```json
+{
+  "code": "import json\nx=json.loads(await get_number({}))\nprint(x['value'])",
+  "tools": [{
+    "name": "get_number",
+    "input_schema": {"type":"object","additionalProperties":false},
+    "allowed_callers": ["code_execution_20260120"]
+  }]
+}
+```
+
+运行进入 waiting 时，pending_tools 提供 id、name、input 和 caller。客户端真实执行工具后提交：
+
+```text
+POST /v1/runs/{id}/tool_results
+```
+
+```json
+{"tool_results":[{"tool_use_id":"实际 pending_tools 的 id","content":"{\"value\":120}","is_error":false}]}
+```
+
+提交返回 202，继续查询运行状态。错误结果设置 is_error=true。重复、未知、跨密钥或已取消的结果会被拒绝；批量提交具备事务原子性。
+
+也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，当前只支持非流式；等待工具返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限返回 202，通过 /v1/runs 查询。此模式是平台执行适配，不是官方沙箱协议的完整替代。
+
+## 15. Skills
+
+独立密钥需要 skills 权限。上传采用 JSON files 映射，包含标准 SKILL.md 和 UTF-8 文本资源。
+
+| 操作 | 接口 |
+| --- | --- |
+| 上传 / 列表 | POST / GET /v1/skills |
+| 查询 / 删除 | GET / DELETE /v1/skills/{id} |
+| 新版本 | POST /v1/skills/{id}/versions |
+| 查询 / 删除指定版本 | GET / DELETE /v1/skills/{id}/versions/{version} |
+
+```json
+{"files":{"SKILL.md":"---\nname: total-report\ndescription: Calculate a total\n---\nRun scripts/total.py.","scripts/total.py":"print(37+83)"}}
+```
+
+创建返回 id 和 version。在 /v1/runs 中使用 skills:[{"skill_id":"实际ID","version":"实际版本"}] 绑定版本。脚本位于 skills/{name}/，输入位于 input/，输出写入 output/。已提交任务保存不可变版本快照，后续更新或删除不改变该任务。
+
+每包最多 64 个资源、合计 256 KiB；每项最多 64 KiB。运行依赖需预装在沙箱模板中。这里只管理用户上传的 Skills，不预置第三方 Skill 内容。

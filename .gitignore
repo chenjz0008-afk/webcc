@@ -7,6 +7,7 @@ __pycache__/
 *.secret
 *.pem
 *.key
+E2Bkey.txt
 serverconfig.txt
 cc*.txt
 *-import.json
