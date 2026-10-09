@@ -125,6 +125,9 @@
 
 ## F. 实际应用验收
 
+- [ ] A03 修复外贸办公深度测试暴露的问题并复测。
+  - 49个公网多步会话完成36个，另有内容质量异常；默认 Chat Completions 工具入口、内部封装、CSV/沙箱依赖及来源验证尚未通过。逐项执行与复测依据见 [体验异常](docs/FOREIGN-TRADE-ISSUES.md) 和 [速度报告](docs/FOREIGN-TRADE-ACCEPTANCE.md)。保留失败样本，不用绕行请求替代正常调用验收。
+
 - [ ] A01 SDK 与文档应用的端到端验收。
   - 用户指定以 WorkBuddy 类应用为目标，只测试并保留必要代码。官方自定义模型采用 Chat Completions；一次服务器真实探测返回 200，但没有标准 tool_calls，必要工具条件未通过。见 [场景报告](docs/DOCUMENT-SCENARIOS.md)。WorkBuddy 桌面应用尚未端到端验收，不能用 Claude SDK 实验通过代替。
   - 合成 Markdown 的相近段落、引文行号、局部修改、真实并发读取与读取失败扩展已通过，见 [场景报告](docs/DOCUMENT-SCENARIOS.md)。这些步骤不再作为独立执行项；实际应用、DOCX 及长任务等门槛仍待验收。
