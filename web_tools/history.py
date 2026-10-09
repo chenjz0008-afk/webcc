@@ -74,11 +74,17 @@ def check_history(history, tools):
                 raise ValueError('Content block must be an object')
             kind = block.get('type')
             if kind == 'text':
-                if set(block) != {'type', 'text'} or not isinstance(block['text'], str):
+                if set(block) - {'type', 'text', 'cache_control', 'citations'} or not isinstance(block.get('text'), str):
                     raise ValueError('Unsupported text block')
                 text_seen = True
+            elif kind in {'thinking', 'redacted_thinking'}:
+                if role != 'assistant':
+                    raise ValueError('Thinking history requires an assistant message')
+                fields = {'type', 'thinking', 'signature'} if kind == 'thinking' else {'type', 'data'}
+                if set(block) - fields or any(not isinstance(v, str) for v in block.values()):
+                    raise ValueError('Invalid thinking history')
             elif kind == 'tool_use':
-                if role != 'assistant' or set(block) != {'type', 'id', 'name', 'input'}:
+                if role != 'assistant' or set(block) - {'type', 'id', 'name', 'input', 'cache_control'} or not {'id', 'name', 'input'} <= set(block):
                     raise ValueError('Unsupported tool call')
                 identity = block['id']
                 if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', identity) or identity in seen:
@@ -90,7 +96,7 @@ def check_history(history, tools):
                 seen.add(identity)
                 calls.add(identity)
             elif kind == 'tool_result':
-                if role != 'user' or text_seen or set(block) - {'type', 'tool_use_id', 'content', 'is_error'}:
+                if role != 'user' or text_seen or set(block) - {'type', 'tool_use_id', 'content', 'is_error', 'cache_control'}:
                     raise ValueError('Tool results must precede text in a user message')
                 identity = block.get('tool_use_id')
                 if not isinstance(identity, str) or identity not in pending or identity in results:
@@ -102,7 +108,7 @@ def check_history(history, tools):
                     if not isinstance(output, list):
                         raise ValueError('Tool results require text or content blocks')
                     for item in output:
-                        if isinstance(item, dict) and set(item) == {'type', 'text'} and item['type'] == 'text' and isinstance(item['text'], str):
+                        if isinstance(item, dict) and not set(item) - {'type', 'text', 'cache_control', 'citations'} and item.get('type') == 'text' and isinstance(item.get('text'), str):
                             continue
                         if not isinstance(item, dict) or set(item) != {'type', 'tool_name'} or item.get('type') != 'tool_reference' or not isinstance(item.get('tool_name'), str) or item['tool_name'] not in schemas:
                             raise ValueError('Invalid tool reference or result block')

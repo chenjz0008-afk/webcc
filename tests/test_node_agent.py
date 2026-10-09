@@ -57,13 +57,15 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.headers['x-webcc-node-error'], '1')
         self.assertFalse(self.seen)
         self.manager.state['accounts']['a']['node_id'] = 'node-1'
-        response = await self.client.post('/internal/forward', headers={**self.headers, 'User-Agent': 'client-host-marker', 'X-Forwarded-For': 'client-address'}, content=b'{}')
+        response = await self.client.post('/internal/forward', headers={**self.headers, 'User-Agent': 'client-host-marker', 'X-Forwarded-For': 'client-address',
+            'anthropic-beta': 'native-extension-test', 'anthropic-version': '2023-06-01'}, content=b'{}')
         self.assertEqual(response.content, b'firstlast')
         self.assertNotIn('x-webcc-node-error', response.headers)
         request = self.seen[0]
         self.assertEqual(request.headers['authorization'], 'Bearer worker-secret')
         self.assertNotIn('client-host-marker', str(request.headers))
         self.assertNotIn('client-address', str(request.headers))
+        self.assertEqual(request.headers['anthropic-beta'], 'native-extension-test')
         self.assertEqual(self.cluster.released, [('a', 'reservation')])
 
     async def test_duplicate_task_cannot_dispatch(self):

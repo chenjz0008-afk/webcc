@@ -7,6 +7,14 @@ import ssl
 from urllib.parse import urlsplit
 
 
+def semantic_headers(headers):
+    allowed = {'content-type', 'anthropic-version', 'anthropic-beta', 'accept'}
+    values = {k.lower(): v for k, v in (headers or {}).items() if k.lower() in allowed}
+    if any(not isinstance(v, str) or len(v) > 4096 or '\r' in v or '\n' in v for v in values.values()):
+        raise ValueError('Invalid protocol header')
+    return values
+
+
 class NodeConnection:
     def __init__(self, endpoint, account, reservation, timeout, on_dispatch=None, on_rejection=None):
         url = urlsplit(endpoint['url'])
@@ -29,10 +37,11 @@ class NodeConnection:
         return self.connection.sock
 
     def request(self, method, path, body=None, headers=None):
+        forwarded = semantic_headers(headers)
         if self.on_dispatch:
             self.on_dispatch()
         self.connection.request(method, self.prefix + '/internal/forward', body, {
-            'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json',
+            'content-type': 'application/json', **forwarded, 'Authorization': 'Bearer ' + self.token,
             'X-WebCC-Account': self.account, 'X-WebCC-Reservation': self.reservation,
             'X-WebCC-Route': path,
         })

@@ -37,8 +37,10 @@ def check_tools(tools, allow_empty=False):
     if not isinstance(tools, list) or (not tools and not allow_empty) or len(tools) > 64:
         raise ValueError('Experimental tools require 1 to 64 definitions')
     for tool in tools:
-        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict', 'input_examples', 'defer_loading'}:
+        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict', 'input_examples', 'defer_loading', 'type', 'cache_control'}:
             raise ValueError('Unsupported experimental tool definition')
+        if tool.get('type', 'custom') != 'custom':
+            raise ValueError('Client tools require custom type')
         if 'defer_loading' in tool and type(tool['defer_loading']) is not bool:
             raise ValueError('defer_loading must be boolean')
         if 'strict' in tool and type(tool['strict']) is not bool:

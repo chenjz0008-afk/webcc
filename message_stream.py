@@ -44,6 +44,16 @@ def block_events(content, start=0):
                 yield event('content_block_delta', index=index, delta={'type': 'citations_delta', 'citation': citation})
         elif kind in {'web_search_tool_result', 'web_fetch_tool_result', 'mcp_tool_result', 'code_execution_tool_result', 'tool_search_tool_result'}:
             yield event('content_block_start', index=index, content_block=block)
+        elif kind == 'thinking':
+            value = block.pop('thinking', '')
+            signature = block.pop('signature', None)
+            yield event('content_block_start', index=index, content_block={**block, 'thinking': ''})
+            if value:
+                yield event('content_block_delta', index=index, delta={'type': 'thinking_delta', 'thinking': value})
+            if signature is not None:
+                yield event('content_block_delta', index=index, delta={'type': 'signature_delta', 'signature': signature})
+        elif kind == 'redacted_thinking':
+            yield event('content_block_start', index=index, content_block=block)
         else:
             raise ValueError('Unsupported adapter stream block')
         yield event('content_block_stop', index=index)

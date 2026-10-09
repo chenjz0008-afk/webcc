@@ -93,6 +93,15 @@ class RuntimeDatabaseTests(unittest.TestCase):
             rows = db.execute("SELECT lock FROM procrastinate_jobs WHERE args->>'identity'=%s", (item['id'],)).fetchall()
         self.assertEqual([r[0] for r in rows], [None, None, None])
 
+    def test_expired_file_cleanup_preserves_active_resources(self):
+        import time
+        with self.cluster.pool.connection() as db:
+            db.execute("INSERT INTO files VALUES ('expired-A','A','a.txt','text/plain',%s,%s,%s),('expired-B','B','b.txt','text/plain',%s,%s,%s),('active-A','A','live.txt','text/plain',%s,%s,%s)",
+                       (time.time(),time.time()-1,b'a',time.time(),time.time()-1,b'b',time.time(),time.time()+100,b'live'))
+        self.assertEqual(self.files.prune(),2)
+        with self.cluster.pool.connection() as db:
+            self.assertEqual(db.execute('SELECT id FROM files').fetchall(),[('active-A',)])
+
     def test_background_preserves_one_interactive_slot(self):
         from psycopg.types.json import Jsonb
         tokens = []

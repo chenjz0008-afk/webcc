@@ -24,13 +24,16 @@ class NodeTransportTests(unittest.TestCase):
     def test_forwarding_replaces_caller_identity_headers(self):
         with patch('node_transport.http.client.HTTPConnection') as transport:
             connection = NodeConnection({'url': 'http://127.0.0.1:9010', 'token': 'node-secret'}, 'account-id', 'reservation-id', 5)
-            connection.request('POST', '/v1/messages', b'{}', {'Authorization': 'Bearer caller-secret', 'X-Forwarded-For': 'caller-address', 'User-Agent': 'caller-host-marker'})
+            connection.request('POST', '/v1/messages', b'{}', {'Authorization': 'Bearer caller-secret', 'X-Forwarded-For': 'caller-address', 'User-Agent': 'caller-host-marker',
+                'anthropic-version': '2023-06-01', 'anthropic-beta': 'native-extension-test', 'Accept': 'text/event-stream'})
             args = transport.return_value.request.call_args.args
             self.assertEqual(args[1], '/internal/forward')
             self.assertNotIn('caller-secret', str(args))
             self.assertNotIn('caller-address', str(args))
             self.assertNotIn('caller-host-marker', str(args))
             self.assertEqual(args[3]['X-WebCC-Reservation'], 'reservation-id')
+            self.assertEqual(args[3]['anthropic-beta'], 'native-extension-test')
+            self.assertEqual(args[3]['accept'], 'text/event-stream')
 
     def test_only_explicit_node_rejection_releases_unclaimed_task(self):
         calls = []

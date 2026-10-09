@@ -49,6 +49,11 @@ class NodeAgent:
         parsed = urlsplit(route)
         if len(route) > 4096 or parsed.scheme or parsed.netloc or parsed.fragment or parsed.path not in allowed:
             return self.error({'error': 'Unsupported worker route'}, 400)
+        from node_transport import semantic_headers
+        try:
+            forwarded = semantic_headers(request.headers)
+        except ValueError:
+            return self.error({'error': 'Invalid protocol header'}, 400)
         identity, reservation = request.headers.get('x-webcc-account', ''), request.headers.get('x-webcc-reservation', '')
         try:
             account = await asyncio.to_thread(self.owned, identity, reservation)
@@ -77,8 +82,8 @@ class NodeAgent:
             upstream = self.client.build_request(request.method,
                 'http://127.0.0.1:' + str(account['port']) + route,
                 content=bytes(raw) if request.method == 'POST' else None,
-                headers={'Authorization': 'Bearer ' + account['key'], 'Content-Type': 'application/json',
-                         'anthropic-version': '2023-06-01', 'Accept-Encoding': 'identity'})
+                headers={'content-type': 'application/json', 'anthropic-version': '2023-06-01', **forwarded,
+                         'Authorization': 'Bearer ' + account['key'], 'Accept-Encoding': 'identity'})
             dispatched = True
             response = await self.client.send(upstream, stream=True)
         except Exception:

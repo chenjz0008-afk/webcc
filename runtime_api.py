@@ -16,6 +16,7 @@ def maintain(manager):
     while True:
         time.sleep(30)
         try:
+            manager.files.prune()
             with manager.cluster.pool.connection() as db:
                 db.execute("SELECT pg_advisory_xact_lock(hashtextextended('webcc:runtime-reconcile',0))")
                 rows = db.execute('''SELECT id FROM webcc_tasks t WHERE

@@ -40,6 +40,7 @@ class ClientGone(Exception):
 
 class StreamState:
     def __init__(self):
+        self.model = 'unknown'
         self.buffer, self.finished, self.failed = b"", False, False
         self.openai_chunk, self.meaningful, self.error_status = False, False, 502
 
@@ -57,6 +58,9 @@ class StreamState:
             try:
                 event = json.loads(value)
                 if isinstance(event, dict):
+                    from capability_policy import model_name
+                    if event.get('type') == 'message_start':
+                        self.model = model_name(event.get('message', {}).get('model'))
                     choices = event.get("choices")
                     if isinstance(choices, list):
                         self.openai_chunk |= any(isinstance(choice, dict) and isinstance(choice.get("delta"), dict)
@@ -797,6 +801,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             if getattr(self, "adapter", None):
                 self.send_header("X-WebCC-Adapter", self.adapter)
+            if getattr(self, 'model_metadata', None):
+                self.send_header('X-WebCC-Requested-Model', self.model_metadata['requested'])
+                self.send_header('X-WebCC-Upstream-Model', self.model_metadata['upstream'])
             if getattr(self, "retry_after", None) is not None:
                 self.send_header("Retry-After", str(self.retry_after))
             if getattr(self, "request_id", None):
@@ -925,6 +932,10 @@ class Handler(BaseHTTPRequestHandler):
             elif route.startswith('/v1/mcp/'):
                 from mcp_connector import route as mcp_route
                 mcp_route(self, target)
+            elif route == '/v1/capabilities' and self.command == 'GET' and not target.query:
+                self.authenticate(scope='models')
+                from capability_policy import capabilities
+                self.respond(200, capabilities())
             elif route == '/v1/files' or route.startswith('/v1/files/'):
                 from web_files import route as file_route
                 file_route(self, target)
@@ -988,7 +999,15 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, RecursionError):
                 payload = None
             reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
+            tools = payload.get('tools') if isinstance(payload, dict) else None
+            if (urlsplit(self.path).path == '/v1/messages' and self.manager.web_tools_enabled and
+                    isinstance(tools, list) and tools and all(isinstance(t, dict) and 'input_schema' in t for t in tools) and not reserved_model):
+                from web_tools.gateway import forward
+                forward(self, raw=body, standard=True)
+                return
             if urlsplit(self.path).path == '/v1/messages':
+                from capability_policy import model_name
+                self.requested_model = model_name(payload.get('model')) if isinstance(payload, dict) else 'unknown'
                 from web_documents import prepare, DocumentProblem
                 try:
                     payload, resolved = self.manager.files.resolve(self.caller_key or 'platform', payload)
@@ -1029,6 +1048,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward_attempt(self, account, body):
         connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())))
+        from request_watch import watch
+        try:
+            with watch(self, connection) as (_, reason):
+                self.interruption = reason
+                return self._forward_attempt(account, body, connection)
+        finally:
+            connection.close()
+            self.manager.release(account)
+
+    def _forward_attempt(self, account, body, connection):
         sent, stream = False, None
         try:
             headers = {k: self.headers[k] for k in ("Content-Type", "anthropic-version", "anthropic-beta", "Accept") if k in self.headers}
@@ -1083,6 +1112,10 @@ class Handler(BaseHTTPRequestHandler):
                         self.manager.record_failure(account, "empty_response")
                         return 502, "上游未返回有效正文"
                 try:
+                    if self.path == '/v1/messages':
+                        from capability_policy import model_name
+                        self.model_metadata = {'requested': getattr(self, 'requested_model', 'unknown'),
+                                               'upstream': model_name(json.loads(data).get('model'))}
                     self.respond(response.status, data, response.getheader("Content-Type") or "application/json")
                 except OSError:
                     raise ClientGone()
@@ -1121,6 +1154,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Transfer-Encoding", "chunked")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")
+                if self.path == '/v1/messages':
+                    self.send_header('X-WebCC-Requested-Model', getattr(self, 'requested_model', 'unknown'))
+                    self.send_header('X-WebCC-Upstream-Model', stream.model)
                 self.end_headers()
             except OSError:
                 raise ClientGone()
@@ -1150,16 +1186,16 @@ class Handler(BaseHTTPRequestHandler):
         except ClientGone:
             self.close_connection = True
         except (OSError, http.client.HTTPException) as error:
+            if getattr(self, 'interruption', None):
+                raise self.interruption[0]
             status = stream.error_status if stream and stream.failed else 504 if isinstance(error, TimeoutError) else 502
             self.manager.record_failure(account, "timeout" if status == 504 else "connection_or_stream_error", status)
             if not sent:
                 return status, "账号通道连接或读取异常"
             self.close_connection = True
-        finally:
-            connection.close()
-            self.manager.release(account)
-
     def upstream_timeout(self, connection):
+        if getattr(self, 'interruption', None):
+            raise self.interruption[0]
         remaining = self.request_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Request deadline")

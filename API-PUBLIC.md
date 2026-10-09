@@ -190,18 +190,20 @@ print(content)
 |---|---|
 | 地址 | `https://165.154.205.213/v1/messages` |
 | 鉴权 | `Authorization: Bearer <API Key>` 或 `x-api-key` |
-| 请求头 | `X-WebCC-Tools: prompt-v1` |
-| `model` | `webcc-prompt-v1` |
-| `max_tokens` | 16—8192，示例使用 1024 |
+| 请求头 | `Content-Type: application/json`；无需专用工具请求头 |
+| `model` | 第 4 节中的模型名，例如 `claude-sonnet-4-6` |
+| `max_tokens` | 正整数，示例使用 1024；实际输出受上游限制 |
 | `tools` | 1—64 个工具，包含 `name`、可选 `description` 和 `input_schema` |
 | `strict` | 工具定义中的可选布尔值，参数采用本地 Schema 校验 |
 | `messages` | 交替的 user / assistant 消息；支持文本、tool_use、文本 tool_result |
-| `system` | 可选文本 |
+| `system` | 可选文本或文本内容块数组 |
 | `stream` | `false` 返回 JSON；`true` 返回 SSE |
 
-可使用平台全局密钥。独立密钥需具备 `messages` 和 `experimental_tools` 权限。
+可使用平台全局密钥。独立密钥需具备 `messages` 权限。
 
-`webcc-prompt-v1` 是网页工具适配标识，不对应保证可选的具体 Claude 型号。所有返回参数均经过本地 JSON Schema 校验；`strict=true` 不提供官方约束采样。响应头以 `X-WebCC-Adapter` 标明该策略。
+标准客户端工具请求自动采用 WebCC 工具适配。返回参数经过本地 JSON Schema 校验；`strict=true` 表示参数校验，不提供官方约束采样。响应头 `X-WebCC-Adapter: standard-tools-v1` 标明该策略。原有 `webcc-prompt-v1` 与专用请求头仍可使用，独立密钥需额外具备 `experimental_tools` 权限。
+
+Thinking、effort、Beta 等请求控制保留，上游返回的 Thinking 与签名保留原值。`cache_control` 可随请求传递，网页上游的实际缓存效果尚未确认。响应 `model` 记录上游返回值，无法取得时为 `unknown`。
 
 ### 9.2 支持范围
 
@@ -227,10 +229,9 @@ print(content)
 curl --fail-with-body --silent --show-error --max-time 180 \
   'https://165.154.205.213/v1/messages' \
   -H "Authorization: Bearer $CLEWDR_API_KEY" \
-  -H 'X-WebCC-Tools: prompt-v1' \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "webcc-prompt-v1",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 1024,
     "stream": false,
     "tools": [{
@@ -282,15 +283,14 @@ history = [{"role": "user", "content": "读取文档 A，收到结果后只回�
 
 def send(choice):
     payload = {
-        "model": "webcc-prompt-v1", "max_tokens": 1024,
+        "model": "claude-sonnet-4-6", "max_tokens": 1024,
         "stream": False, "tools": tools,
         "tool_choice": choice, "messages": history,
     }
     request = urllib.request.Request(
         URL, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": "Bearer " + KEY,
-                 "Content-Type": "application/json",
-                 "X-WebCC-Tools": "prompt-v1"},
+                 "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=180) as response:
         return json.load(response)

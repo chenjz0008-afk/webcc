@@ -1,0 +1,37 @@
+{
+  "candidate_only": true,
+  "regression": {
+    "tests": 199,
+    "passed": 199,
+    "seconds": 91.677
+  },
+  "two_instances": {
+    "pass": true,
+    "shared_rpm": true,
+    "opposite_node_agents": true,
+    "peak_accounts": 2,
+    "seconds": 5.626,
+    "occupancy_released": true
+  },
+  "native_probe": {
+    "http_status": 200,
+    "message_stop": true,
+    "thinking_blocks": 1,
+    "signature_received": false,
+    "declared_client_tool_called": false,
+    "cache_effect": "not established by parameter acceptance"
+  },
+  "request_policy": "preserve protocol extensions; no new unsupported-feature rejection",
+  "clewdr_modified": false,
+  "standard_sdk": {
+    "pass": true,
+    "stream_without_optin": true,
+    "client_execution": 120,
+    "history_result_return": true,
+    "messages_scope_only": true,
+    "actual_model": "claude-sonnet-5-5",
+    "thinking_blocks": 0,
+    "signature_received": false,
+    "seconds": 10.761
+  }
+}

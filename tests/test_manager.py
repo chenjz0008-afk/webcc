@@ -132,8 +132,19 @@ class ManagerTests(unittest.TestCase):
         for path in ("/v1/messages?beta=true", "/code/v1/messages?beta=true", "/v1/chat/completions?trace=one%20two"):
             with self.subTest(path=path):
                 body = {**self.payload(), "tools": [{"name": "lookup", "input_schema": {"type": "object"}}]}
-                status, _, _ = self.request("POST", path, body, key="", extra={"x-api-key": "api-password"})
+                if path.startswith('/v1/messages'):
+                    key = 'Bearer ' + self.manager.get_account(self.identity)['key']
+                    Worker.replies[key] = (200, json.dumps({'model':'actual-model','content':[{'type':'text','text':'{"calls":[{"name":"lookup","input":{}}],"text":""}'}], 'stop_reason':'end_turn','usage':{'input_tokens':1,'output_tokens':1}}).encode())
+                    self.manager.web_tools_enabled = True
+                status, _, response = self.request("POST", path, body, key="", extra={"x-api-key": "api-password"})
                 self.assertEqual(status, 200)
+                if path.startswith('/v1/messages'):
+                    self.assertEqual(json.loads(response)['content'][0]['name'], 'lookup')
+                    self.assertEqual(Worker.seen[-1]['path'], path)
+                    self.assertTrue(json.loads(Worker.seen[-1]['body'])['stream'])
+                    self.assert_idle()
+                    Worker.replies = {}
+                    continue
                 self.assertEqual(Worker.seen[-1]["path"], path)
                 self.assertEqual(json.loads(Worker.seen[-1]["body"]), body)
                 self.assertNotIn("x-api-key", {k.lower(): v for k, v in Worker.seen[-1]["headers"].items()})

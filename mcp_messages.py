@@ -171,7 +171,8 @@ def execute_connected(handler, fields, on_check, connections, emit=None):
 
 
 def messages(handler):
-    handler.authenticate(scope='mcp')
+    if handler.caller_key and 'mcp' not in handler.manager.api_keys.active(handler.caller_key)['scopes']:
+        raise FileProblem(403, 'Key requires MCP permission')
     if handler.path != '/v1/messages' or handler.headers.get('anthropic-beta') not in (None, 'mcp-client-2025-11-20'):
         raise FileProblem(400, 'Unsupported MCP query or beta header')
     if not handler.manager.web_tools_enabled:

@@ -6,13 +6,19 @@ class UnexpectedTool(ValueError):
     pass
 
 
-def read(response):
+def read(response, thinking=False):
     if 'text/event-stream' not in response.getheader('Content-Type', ''):
         raw = response.read(1048577)
         if len(raw) > 1048576 or response.length not in (None, 0):
             raise ValueError('Upstream response exceeds limit')
+        if thinking:
+            value = json.loads(raw)
+            if isinstance(value, dict) and isinstance(value.get('content'), list):
+                value['_webcc_thinking'] = [b for b in value['content'] if b.get('type') in {'thinking', 'redacted_thinking'}]
+                value['content'] = [b for b in value['content'] if b.get('type') not in {'thinking', 'redacted_thinking'}]
+                raw = json.dumps(value, ensure_ascii=False).encode()
         return raw
-    message, blocks, completed, size = None, {}, False, 0
+    message, blocks, thoughts, completed, size = None, {}, {}, False, 0
     for line in response:
         size += len(line)
         if size > 1048576 or len(line) > 131072:
@@ -33,8 +39,15 @@ def read(response):
                 raise UnexpectedTool('Unexpected built-in tool execution in client-tool mode')
             if block['type'] == 'text':
                 blocks[event['index']] = {'type': 'text', 'text': block.get('text', '')}
+            elif thinking:
+                thoughts[event['index']] = dict(block)
         elif kind == 'content_block_delta' and event.get('delta', {}).get('type') == 'text_delta':
             blocks[event['index']]['text'] += event['delta']['text']
+        elif kind == 'content_block_delta' and thinking and event['index'] in thoughts:
+            delta = event['delta']
+            if delta.get('type') in {'thinking_delta', 'signature_delta'}:
+                field = 'thinking' if delta['type'] == 'thinking_delta' else 'signature'
+                thoughts[event['index']][field] = thoughts[event['index']].get(field, '') + delta[field]
         elif kind == 'message_delta':
             if message is None:
                 raise ValueError('Missing message start')
@@ -47,4 +60,6 @@ def read(response):
     if not message or not completed or message.get('stop_reason') not in {'end_turn', 'max_tokens', 'refusal', 'stop_sequence'}:
         raise ValueError('Incomplete upstream message')
     message['content'] = [blocks[i] for i in sorted(blocks)]
+    if thoughts:
+        message['_webcc_thinking'] = [thoughts[i] for i in sorted(thoughts)]
     return json.dumps(message, ensure_ascii=False).encode()
