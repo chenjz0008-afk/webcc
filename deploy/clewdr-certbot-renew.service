@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew WebCC IP HTTPS certificate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot-venv/bin/certbot renew --quiet --no-random-sleep-on-renew

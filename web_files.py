@@ -10,15 +10,14 @@ import threading
 import time
 from urllib.parse import parse_qs, urlencode
 
-MAX_FILE = 20 * 1024 * 1024
-OWNER_QUOTA = 256 * 1024 * 1024
-TOTAL_QUOTA = 1024 * 1024 * 1024
+from runtime_limits import FILE_MAX as MAX_FILE, OWNER_BYTES as OWNER_QUOTA, TOTAL_BYTES as TOTAL_QUOTA, FILES_PER_KEY, DEFAULT_TTL
 
 
 class FileProblem(ValueError):
     def __init__(self, status, message):
         super().__init__(message)
         self.status = status
+        self.retry_after = 1 if status == 429 else None
 
 
 def stamp(value):
@@ -29,7 +28,7 @@ def validate_content(mime, raw):
     signatures = {'application/pdf': b'%PDF-', 'image/png': b'\x89PNG\r\n\x1a\n',
                   'image/jpeg': b'\xff\xd8\xff', 'image/gif': b'GIF8', 'image/webp': b'RIFF'}
     if not raw or len(raw) > MAX_FILE:
-        raise FileProblem(413, 'File must contain 1 byte to 20 MiB')
+        raise FileProblem(413, 'File exceeds configured size limit or is empty')
     if mime == 'text/plain':
         try:
             raw.decode('utf-8')
@@ -147,13 +146,14 @@ class FileStore:
 
     def put(self, owner, filename, mime, raw, expiry=None):
         validate_content(mime, raw)
+        expiry = DEFAULT_TTL if expiry is None else expiry
         now = time.time()
         row = ('file_webcc_' + secrets.token_hex(16), owner, filename, mime, now, now + expiry if expiry else None, raw)
         with self.lock, self.connect() as db:
             db.execute('DELETE FROM files WHERE expires IS NOT NULL AND expires <= ?', (now,))
             total = db.execute('SELECT coalesce(sum(length(data)),0) FROM files').fetchone()[0]
             owned, count = db.execute('SELECT coalesce(sum(length(data)),0),count(*) FROM files WHERE owner=?', (owner,)).fetchone()
-            if total + len(raw) > TOTAL_QUOTA or owned + len(raw) > OWNER_QUOTA or count >= 128:
+            if total + len(raw) > TOTAL_QUOTA or owned + len(raw) > OWNER_QUOTA or count >= FILES_PER_KEY:
                 raise FileProblem(413, 'File storage quota exceeded')
             db.execute('INSERT INTO files VALUES (?,?,?,?,?,?,?)', row)
         return self.metadata(row)

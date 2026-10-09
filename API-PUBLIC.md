@@ -1,6 +1,6 @@
 # WebCC API 接入说明
 
-文档版本：2026-10-07
+文档版本：2026-10-08
 
 ## 1. 连接配置
 
@@ -323,6 +323,44 @@ print(text)
 
 工具流先等待并校验完整上游结果，再输出 SSE；等待期间发送 ping，以 message_stop 结束，失败发送 error 事件。
 
+### 9.6 参数样例与结构化 JSON
+
+工具定义可带 input_examples，提供 1—8 个符合 input_schema 的对象。
+
+结构化 JSON 请求使用 output_config.format。返回内容经本地 Schema 校验后放入 text 内容块。
+
+```bash
+curl --fail-with-body -sS --max-time 180 \
+  'https://165.154.205.213/v1/messages' \
+  -H "x-api-key: ${CLEWDR_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -H 'X-WebCC-Tools: prompt-v1' \
+  -d '{
+    "model": "webcc-prompt-v1",
+    "max_tokens": 1024,
+    "output_config": {"format": {"type": "json_schema", "schema": {
+      "type": "object",
+      "properties": {"total": {"type": "integer"}},
+      "required": ["total"], "additionalProperties": false
+    }}},
+    "messages": [{"role": "user", "content": "计算37加83，返回total。"}]
+  }'
+```
+
+响应 text 的 JSON 内容为 `{"total":120}`。
+
+### 9.7 工具目录检索
+
+`POST /v1/tools/search` 接收 tools、query 和可选 limit，limit 为 1—16，默认 5。使用平台密钥或具有 experimental_tools 权限的独立密钥。
+
+响应包含 tools、tool_references 和 count。定义设置 defer_loading=true 时，调用方先完成工具检索，再在对应 tool_result.content 中回传引用：
+
+```json
+[{"type":"tool_reference","tool_name":"save_result"}]
+```
+
+引用必须对应本次请求 tools 中声明的工具。检索结果只来自调用方提交的目录。
+
 ## 10. 联网搜索
 
 普通 `POST /v1/messages` 已开启网页搜索和网页读取。需要实时信息时，在消息中明确要求搜索，并要求返回来源链接。
@@ -345,3 +383,25 @@ curl --fail-with-body -sS -N --max-time 180 \
 ```
 
 网页搜索由上游执行，客户端读取最终文本，无需执行返回的 `web_search` 或 `web_fetch`。该功能使用普通 Messages 路径；第 9 节的 `prompt-v1` 用于客户端自定义工具。
+
+## 11. 文件资源
+
+独立密钥需要 files 权限。文件通过 multipart/form-data 的 file 字段上传，返回的 ID 可跨轮引用。文件仅允许所属密钥访问。
+
+| 操作 | 接口 |
+| --- | --- |
+| 上传 | POST /v1/files |
+| 列表 | GET /v1/files |
+| 元数据 | GET /v1/files/{id} |
+| 下载 | GET /v1/files/{id}/content |
+| 删除 | DELETE /v1/files/{id} |
+
+上传支持 UTF-8 文本、PDF、PNG、JPEG、GIF、WebP。默认单文件最多 20 MiB；上传可带 expires_in_seconds，范围 3600—7776000。资源删除或到期后，引用返回 404。
+
+在 Messages 的 user 内容或工具结果中引用文件：
+
+```json
+{"type":"document","source":{"type":"file","file_id":"file_webcc_..."}}
+```
+
+图片将 type 改为 image。普通 Messages 可引用文件；附件与客户端工具混用时使用第 9 节配置。

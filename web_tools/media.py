@@ -5,7 +5,7 @@ import copy
 from web_documents import prepare as prepare_documents
 from web_files import FileProblem, validate_content
 
-MAX_REQUEST = 32 * 1024 * 1024
+from runtime_limits import TOOL_REQUEST_MAX as MAX_REQUEST, ATTACHMENT_COUNT
 
 
 def separate(payload):
@@ -46,7 +46,7 @@ def separate(payload):
             raise ValueError('Image source must use an image MIME type')
         validate_content(mime, raw)
         total += len(source['data'])
-        if total > MAX_REQUEST or len(attachments) >= 32:
+        if total > MAX_REQUEST or len(attachments) >= 2 * ATTACHMENT_COUNT:
             raise FileProblem(413, 'Attachments exceed request limits')
         identity = 'attachment_' + str(len(attachments) // 2 + 1)
         label = identity + ' (' + mime + ')' + ('\n' + prefix if prefix else '')

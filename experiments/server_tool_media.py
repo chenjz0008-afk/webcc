@@ -74,11 +74,14 @@ def main():
 
             tools = [
                 {'name': 'read_media', 'input_schema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
-                {'name': 'save_result', 'description': 'Save the count or sum calculated from the actual attachment.', 'strict': True,
+                {'name': 'save_result', 'description': 'Save the count or sum calculated from the actual attachment.', 'strict': True, 'input_examples': [{'value': 120}],
                  'input_schema': {'type': 'object', 'properties': {'value': {'type': 'integer'}}, 'required': ['value'], 'additionalProperties': False}}]
             for filename, mime, raw, expected, in_result in [
                 ('allocation.pdf', 'application/pdf', (Path(__file__).parent/'fixtures/allocation.pdf').read_bytes(), 120, False),
                 ('blocks.png', 'image/png', (Path(__file__).parent/'fixtures/blocks.png').read_bytes(), 3, False),
+                ('blocks.jpg', 'image/jpeg', (Path(__file__).parent/'fixtures/blocks.jpg').read_bytes(), 3, False),
+                ('blocks.gif', 'image/gif', (Path(__file__).parent/'fixtures/blocks.gif').read_bytes(), 3, False),
+                ('blocks.webp', 'image/webp', (Path(__file__).parent/'fixtures/blocks.webp').read_bytes(), 3, False),
                 ('tool-allocation.pdf', 'application/pdf', (Path(__file__).parent/'fixtures/allocation.pdf').read_bytes(), 120, True)]:
                 boundary = 'webcc-' + secrets.token_hex(12)
                 body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n').encode()+raw+(f'\r\n--{boundary}--\r\n').encode()
@@ -117,7 +120,25 @@ def main():
                 report['checks'].append({'file':filename,'media_in_tool_result':in_result,'tool_input':calls[0]['input'],
                     'real_saved_value':actual['value'],'real_model_final':text,'cross_key_denied':True,'deleted_reference_denied_before_inference':True})
                 print('MEDIA_CASE_PASS',filename,flush=True)
-            report['model_requests']=6
+            schema={'type':'object','properties':{'total':{'const':120}},'required':['total'],'additionalProperties':False}
+            structured={'model':'webcc-prompt-v1','max_tokens':1024,'messages':[{'role':'user','content':'Add 37 and 83. Return total.'}], 'output_config':{'format':{'type':'json_schema','schema':schema}}}
+            status,response=request('POST','/v1/messages',structured);assert status==200,(status,response)
+            assert json.loads(json.loads(response)['content'][0]['text'])=={'total':120}
+            report['structured_json_real']={'total':120}
+            deferred={**tools[1],'defer_loading':True}
+            loaded={'name':'find_tools','input_schema':{'type':'object'}}
+            status,response=request('POST','/v1/tools/search',{'tools':[loaded,deferred],'query':'save_result','limit':1})
+            assert status==200,(status,response)
+            found=json.loads(response)
+            history=[{'role':'user','content':'Save the integer 120 using the discovered tool.'},
+                {'role':'assistant','content':[{'type':'tool_use','id':'toolu_catalog','name':'find_tools','input':{}}]},
+                {'role':'user','content':[{'type':'tool_result','tool_use_id':'toolu_catalog','content':found['tool_references']}]}]
+            status,response=request('POST','/v1/messages',{'model':'webcc-prompt-v1','max_tokens':1024,'tools':[loaded,deferred], 'tool_choice':{'type':'tool','name':'save_result'},'messages':history})
+            assert status==200,(status,response)
+            discovered=json.loads(response)['content'][0]
+            assert discovered['name']=='save_result' and discovered['input']=={'value':120}
+            report['deferred_tool_real']={'name':discovered['name'],'input':discovered['input']}
+            report['model_requests']=14
             report['pass'] = True
         finally:
             if server:

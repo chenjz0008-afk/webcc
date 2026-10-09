@@ -1,0 +1,9 @@
+{
+  "real_model_json": {
+    "total": 120
+  },
+  "file_upload_download_bytes": true,
+  "public_tool_search": true,
+  "key_revocation": true,
+  "pass": true
+}

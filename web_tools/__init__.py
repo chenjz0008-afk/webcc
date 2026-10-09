@@ -2,7 +2,7 @@
 import json
 from uuid import uuid4
 from jsonschema import Draft202012Validator
-from web_tools.history import bounded_json, check_choice, check_history
+from web_tools.history import bounded_json, check_choice, check_history, load_json
 
 ENVELOPE = {
     'type': 'object', 'required': ['calls', 'text'], 'additionalProperties': False,
@@ -15,7 +15,7 @@ ENVELOPE = {
 }
 
 
-def check_tools(tools):
+def check_schema(schema):
     def local_refs(value):
         if isinstance(value, dict):
             for key, item in value.items():
@@ -27,12 +27,20 @@ def check_tools(tools):
         elif isinstance(value, list):
             for item in value:
                 local_refs(item)
+    bounded_json(schema)
+    local_refs(schema)
+    Draft202012Validator.check_schema(schema)
+
+
+def check_tools(tools, allow_empty=False):
     bounded_json(tools)
-    if not isinstance(tools, list) or not tools or len(tools) > 64:
+    if not isinstance(tools, list) or (not tools and not allow_empty) or len(tools) > 64:
         raise ValueError('Experimental tools require 1 to 64 definitions')
     for tool in tools:
-        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict'}:
+        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict', 'input_examples', 'defer_loading'}:
             raise ValueError('Unsupported experimental tool definition')
+        if 'defer_loading' in tool and type(tool['defer_loading']) is not bool:
+            raise ValueError('defer_loading must be boolean')
         if 'strict' in tool and type(tool['strict']) is not bool:
             raise ValueError('Experimental strict must be boolean; validation is local')
         if not isinstance(tool.get('name'), str) or not tool['name'] or len(tool['name']) > 64:
@@ -45,15 +53,27 @@ def check_tools(tools):
     if len(names) != len(set(names)):
         raise ValueError('Duplicate tool names')
     for tool in tools:
-        local_refs(tool['input_schema'])
-        Draft202012Validator.check_schema(tool['input_schema'])
+        check_schema(tool['input_schema'])
+        if 'input_examples' in tool:
+            examples = tool['input_examples']
+            if not isinstance(examples, list) or not 1 <= len(examples) <= 8 or any(not isinstance(e, dict) for e in examples):
+                raise ValueError('input_examples requires 1 to 8 input objects')
+            for example in examples:
+                Draft202012Validator(tool['input_schema']).validate(example)
 
 
-def build_prompt(tools, history, choice=None):
-    check_tools(tools)
+def build_prompt(tools, history, choice=None, allow_empty=False):
+    check_tools(tools, allow_empty)
     choice = {'type': 'auto'} if choice is None else choice
     check_choice(choice, tools)
-    payload = {'tools': tools, 'tool_choice': choice, 'history': history}
+    bounded_json(history)
+    check_history(history, tools)
+    from web_tools.discovery import visible_tools
+    active = visible_tools(tools, history)
+    if tools and not active:
+        raise ValueError('At least one tool must be loaded')
+    check_choice(choice, active)
+    payload = {'tools': active, 'tool_choice': choice, 'history': history}
     encoded = bounded_json(payload)
     check_history(history, tools)
     return (
@@ -68,22 +88,13 @@ def build_prompt(tools, history, choice=None):
     )
 
 
-def parse_response(text, tools, choice=None):
-    check_tools(tools)
+def parse_response(text, tools, choice=None, allow_empty=False):
+    check_tools(tools, allow_empty)
     choice = {'type': 'auto'} if choice is None else choice
     check_choice(choice, tools)
     if not isinstance(text, str) or len(text.encode('utf-8')) > 131072:
         raise ValueError('Experimental response exceeds byte limit')
-    def unique_keys(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError('Duplicate JSON key')
-            result[key] = value
-        return result
-    def invalid_constant(value):
-        raise ValueError('Non-JSON numeric constant')
-    response = json.loads(text, object_pairs_hook=unique_keys, parse_constant=invalid_constant)
+    response = load_json(text)
     bounded_json(response)
     Draft202012Validator(ENVELOPE).validate(response)
     calls = response['calls']

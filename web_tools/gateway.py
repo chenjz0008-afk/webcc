@@ -8,11 +8,12 @@ import time
 import uuid
 from manager import ClientGone, Problem
 from jsonschema.exceptions import ValidationError, SchemaError, RefResolutionError
-from web_tools.api import complete, events, prepare
+from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
+from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
 
 
-MEDIA_SLOTS = threading.BoundedSemaphore(2)
+MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
 
 
 def forward(handler):
@@ -46,20 +47,24 @@ def _forward(handler, admit):
     def chunk(data):
         handler.write_stream(('%x\r\n' % len(data)).encode() + data + b'\r\n')
 
-    def error(status, kind, message):
+    def error(status, kind, message, code=None):
+        detail = {'type': kind, 'message': message}
+        if code:
+            detail['code'] = code
         if sent:
-            chunk(('event: error\ndata: ' + json.dumps({'type': 'error', 'error': {'type': kind, 'message': message}}) + '\n\n').encode())
+            chunk(('event: error\ndata: ' + json.dumps({'type': 'error', 'error': detail}) + '\n\n').encode())
             handler.write_stream(b'0\r\n\r\n')
         else:
-            handler.respond(status, {'type': 'error', 'error': {'type': kind, 'message': message}, 'request_id': handler.request_id})
+            handler.respond(status, {'type': 'error', 'error': detail, 'request_id': handler.request_id})
 
     try:
         if handler.headers.get('anthropic-beta') or handler.path != '/v1/messages':
             raise ValueError('Beta and query parameters are unsupported in prompt-v1')
         if int(handler.headers.get('Content-Length', '0')) > 131072:
             admit()
-        request, body = prepare(handler.body(32 * 1024 * 1024), handler.manager.files, handler.caller_key or 'platform', on_media=admit)
+        request, body = prepare(handler.body(TOOL_REQUEST_MAX), handler.manager.files, handler.caller_key or 'platform', on_media=admit)
     except FileProblem as problem:
+        handler.retry_after = problem.retry_after
         handler.close_connection = True
         error(problem.status, 'invalid_request_error', str(problem))
         return
@@ -86,7 +91,7 @@ def _forward(handler, admit):
                 last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error', 'No experimental account available')
             break
         attempted.add(account['id'])
-        connection = http.client.HTTPConnection('127.0.0.1', account['port'], timeout=min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())))
+        connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())))
         done, cancelled = threading.Event(), threading.Event()
         result, transport = {}, {}
 
@@ -100,7 +105,8 @@ def _forward(handler, admit):
                 if cancelled.is_set():
                     return
                 response = connection.getresponse()
-                result.update(status=response.status, retry_after=response.getheader('Retry-After'))
+                result.update(status=response.status, retry_after=response.getheader('Retry-After'),
+                              node_error=response.getheader('X-WebCC-Node-Error') == '1')
                 raw = response.read(1048577)
                 if len(raw) > 1048576 or response.length not in (None, 0):
                     raise ValueError('Invalid upstream size')
@@ -147,11 +153,14 @@ def _forward(handler, admit):
                     pass
             done.wait(1)
             if isinstance(exc, TimeoutError):
-                error(504, 'api_error', 'Experimental request deadline exceeded')
+                error(504, 'api_error', 'Experimental request deadline exceeded', 'request_timeout')
             else:
                 handler.close_connection = True
             return
         status = result.get('status', 502)
+        if result.get('node_error'):
+            last = (503, 'api_error', 'Worker node unavailable')
+            continue
         if result.get('failure'):
             status = 504 if result['failure'] == 'TimeoutError' else 502
             last = (status, 'api_error', 'Experimental upstream connection failed')
@@ -160,9 +169,10 @@ def _forward(handler, admit):
         else:
             try:
                 message = complete(result['body'], request)
-            except Exception:
-                # Model formatting failure is not proof of account failure.
-                last = (502, 'api_error', 'Experimental output failed validation')
+            except OutputProblem as problem:
+                last = (502, 'api_error', str(problem), problem.code)
+                if not problem.retry:
+                    break
                 continue
             alive()
             if sent:

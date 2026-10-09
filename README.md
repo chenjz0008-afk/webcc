@@ -14,7 +14,8 @@ WebCC 是一个用于管理多个 Claude 网页账号的后台和 API 网关。�
 flowchart TD
     Browser[管理页面 / API 调用者] --> Nginx[Nginx HTTPS :443]
     Nginx --> Manager[WebCC · 127.0.0.1:9000]
-    Manager --> Store[私有账号资料与运行状态]
+    Manager --> Store[PostgreSQL · 状态、密钥与文件]
+    Manager --> Limits[Redis · 共享请求限流]
     Manager --> WorkerA[官方 ClewdR · 账号 A]
     Manager --> WorkerB[官方 ClewdR · 账号 B]
     WorkerA --> ProxyA[账号 A 的代理]
@@ -24,6 +25,8 @@ flowchart TD
 ```
 
 后端使用 Python 标准库，通过 Docker CLI 管理容器。前端使用 React、MUI 和 Vite。Nginx 提供 HTTPS，并将页面、管理接口和模型请求转发给 WebCC。账号容器使用随机本地端口，只有网关入口对外提供服务。
+
+2026-10-08 生产已切换到 PostgreSQL 和 Redis。文件按当前部署选择保存为 BYTEA。中心调度保存持久占用，进程重启不会自动释放未确认结束的任务。节点 Agent 使用 Starlette、HTTPX 和 Uvicorn，目前在隔离环境验收，尚未启用跨服务器生产路由。迁移步骤见 [迁移与恢复](docs/POSTGRESQL-MIGRATION.md)，扩容边界见 [多服务器架构](docs/MULTI-SERVER-ARCHITECTURE.md)。
 
 | 部分 | 职责 |
 | --- | --- |
