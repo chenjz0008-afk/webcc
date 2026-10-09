@@ -4,7 +4,7 @@
 
 新增 WebCC Thinking 状态令牌和来源凭据，绑定调用者并设置到期；上游签名保持原值。来源正文通过指定代理提取，引用逐字核对。Redis 仅加密缓存确定性处理结果，不缓存动态答复或声明模型 KV 缓存。继续复用 PostgreSQL、Redis、Procrastinate、MCP SDK 和 E2B；未修改 ClewdR。
 
-215 项回归通过，无跳过。官方 SDK 真实工具往返得到 120，10.741 秒；Beta SDK 上传文件、Skills 快照执行、生成文件下载与删除通过。真实网页引用、Thinking 与来源历史续问通过。修复真实验收发现的输出目录重复和 Skills latest 解析问题。见 [验收](docs/adapter-acceptance-2026-10-09.json)。部署另行核对。
+215 项回归通过，无跳过。官方 SDK 真实工具往返得到 120，10.741 秒；Beta SDK 上传文件、Skills 快照执行、生成文件下载与删除通过。真实网页引用、Thinking 与来源历史续问通过。修复真实验收发现的输出目录重复和 Skills latest 解析问题。见 [验收](docs/adapter-acceptance-2026-10-09.json)。fefde29 已部署，89 个运行文件摘要一致。公网 SDK 工具两轮通过，14.005 秒；联网流式 Thinking 与 4 条原文引用通过，12.543 秒。11 个 ClewdR 配置、镜像与启动时间未变，临时密钥已清理。备份：/var/backups/webcc/adapter-tools-20261009T125918Z。
 
 ## 2026-10-09 · 标准客户端工具与扩展保留
 

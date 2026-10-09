@@ -70,5 +70,34 @@
     "WebCC state is not an Anthropic signature",
     "preprocessing cache is not model KV cache",
     "local schema validation is not constrained sampling"
-  ]
+  ],
+  "deployment": {
+    "clewdr_image_matches": 11,
+    "containers_not_restarted_since_release": 11,
+    "configs_not_modified": 11,
+    "temporary_keys": 0,
+    "occupancy": 0,
+    "source_commit": "fefde29",
+    "backup": "/var/backups/webcc/adapter-tools-20261009T125918Z",
+    "runtime_manifest_matches_commit": true
+  },
+  "public_acceptance": {
+    "pass": true,
+    "checks": {
+      "official_sdk_stream_client_tool_without_optin": true,
+      "executed_client_result_and_history_return": true,
+      "messages_scope_only": true,
+      "public_sdk_native_stream_sources_and_signatures": true
+    },
+    "actual_model": "claude-sonnet-5-5",
+    "thinking_blocks": 0,
+    "signature_received": false,
+    "seconds": 14.005,
+    "native_stream": {
+      "thinking_blocks": 1,
+      "citations": 4,
+      "actual_model": "claude-sonnet-5-5",
+      "seconds": 12.543
+    }
+  }
 }
