@@ -205,6 +205,7 @@ class Manager:
         self.request_seconds = max(10, float(os.environ.get("MANAGER_REQUEST_SECONDS", "150")))
         self.worker_seconds = max(5, float(os.environ.get("MANAGER_WORKER_SECONDS", "60")))
         self.condition = threading.Condition(threading.RLock())
+        self.background = threading.local()
         self.operations = threading.RLock()
         self.proxy_checks = threading.BoundedSemaphore(2)
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
@@ -235,6 +236,12 @@ class Manager:
             self.files = PostgresFiles(self.cluster)
         else:
             self.files = FileStore(self.data)
+        self.tasks = None
+        if os.environ.get('MANAGER_RUNTIME_ENABLED', 'false').lower() == 'true':
+            if not self.cluster:
+                raise ValueError('Durable runtime requires PostgreSQL')
+            from task_store import TaskStore
+            self.tasks = TaskStore(self.cluster)
         self.image = self.state["update"].get("image", image)
         for account in self.state["accounts"].values():
             account.setdefault("session_imported_at", account.get("created_at", int(time.time())))
@@ -631,13 +638,15 @@ class Manager:
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
-                    if available and self.total < self.max_inflight:
+                    capacity = max(1, self.max_inflight - 1) if getattr(self.background, 'enabled', False) else self.max_inflight
+                    if available and self.total < capacity:
                         account = min(available, key=lambda item: self.last_used.get(item["id"], 0))
                         if self.cluster:
                             try:
                                 token = None
                                 for candidate in sorted(available, key=lambda item: self.last_used.get(item["id"], 0)):
-                                    token = self.cluster.reserve(candidate["id"], self.node_id, self.max_inflight, statuses)
+                                    token = self.cluster.reserve(candidate["id"], self.node_id, self.max_inflight, statuses,
+                                        background=getattr(self.background, 'enabled', False))
                                     if token:
                                         account = candidate
                                         break
@@ -901,6 +910,15 @@ class Handler(BaseHTTPRequestHandler):
                     identity, action = match.groups()
                     result = self.manager.check_account_proxy(identity) if action == "proxy-test" else self.manager.probe(identity) if action == "probe" else self.manager.control(identity, action)
                     self.respond(200, result or {"ok": True})
+            elif route == '/internal/runtime' and self.command == 'POST':
+                from runtime_api import process
+                process(self)
+            elif route == '/v1/messages/batches' or route.startswith('/v1/messages/batches/'):
+                from batch_tasks import route as batch_route
+                batch_route(self, target)
+            elif route in {'/v1/skills', '/v1/runs'} or route.startswith(('/v1/skills/', '/v1/runs/')):
+                from runtime_api import route as runtime_route
+                runtime_route(self, target)
             elif route == '/v1/tools/search' and self.command == 'POST':
                 from web_tools.discovery import route as tool_search_route
                 tool_search_route(self)
@@ -920,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
             self.retry_after = error.retry_after
             self.close_connection = True
             self.respond(error.status, {"error": {"message": str(error)}})
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError, AttributeError, RecursionError):
             self.close_connection = True
             self.respond(400, {"error": {"message": "请求格式无效"}})
         except (BrokenPipeError, ConnectionResetError, ClientGone):
@@ -934,6 +952,10 @@ class Handler(BaseHTTPRequestHandler):
         self.manager.check_upstream(os.environ.get("MANAGER_FOLLOW", "master"), True)
 
     def forward(self):
+        if self.headers.get('X-WebCC-Runtime'):
+            from runtime_api import messages
+            messages(self)
+            return
         mode = self.headers.get("X-WebCC-Tools")
         if mode:
             if mode != "prompt-v1" or not self.manager.web_tools_enabled or self.command != "POST" or urlsplit(self.path).path != "/v1/messages":
@@ -1184,6 +1206,9 @@ def main():
             manager.check_upstream(os.environ.get("MANAGER_FOLLOW", "master"), os.environ.get("MANAGER_AUTO_UPDATE", "true").lower() == "true")
             time.sleep(60)
     threading.Thread(target=maintenance, daemon=True).start()
+    if manager.tasks:
+        from runtime_api import maintain
+        threading.Thread(target=maintain, args=(manager,), daemon=True).start()
     bind = os.environ.get("MANAGER_BIND", "127.0.0.1")
     port = int(os.environ.get("MANAGER_PORT", "9000"))
     print("manager_listening", bind, port, flush=True)

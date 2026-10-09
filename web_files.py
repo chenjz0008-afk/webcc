@@ -144,8 +144,12 @@ class FileStore:
                 'size_bytes': len(row[6]), 'created_at': stamp(row[4]), 'downloadable': True,
                 'expires_at': stamp(row[5]) if row[5] else None}
 
-    def put(self, owner, filename, mime, raw, expiry=None):
-        validate_content(mime, raw)
+    def put(self, owner, filename, mime, raw, expiry=None, *, generated=False):
+        if generated and mime not in {'text/plain', 'application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'}:
+            if not raw or len(raw) > MAX_FILE:
+                raise FileProblem(413, 'Generated file exceeds configured size limit or is empty')
+        else:
+            validate_content(mime, raw)
         expiry = DEFAULT_TTL if expiry is None else expiry
         now = time.time()
         row = ('file_webcc_' + secrets.token_hex(16), owner, filename, mime, now, now + expiry if expiry else None, raw)

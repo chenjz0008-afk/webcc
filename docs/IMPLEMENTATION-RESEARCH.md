@@ -98,3 +98,17 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 对照官方工具结果内容块及 Files 输入引用；复用已有 FileStore 所有权校验、web_documents 的 PDF 转换和原版 ClewdR 媒体上传。不引入另一个解析器、OCR 服务或第二套文件库。工具历史保留附件对应标记，二进制附件单独进入网页请求；模型结果仍经过现有 JSON Schema 与 tool_choice 校验。普通文本历史预算保持 128 KiB，完整请求上限 32 MiB，最多 16 个附件。主机不执行模型生成的命令。
 
 网页沙箱文件调研参考公开 claude-exporter 的组织/会话绑定接口，并核对固定 ClewdR 创建会话的流程。下载前必须证明绑定可取得且会话仍有效；不以 present_files 的路径冒充已下载字节。整体模块边界及验收顺序见 [工具架构](TOOL-CAPABILITY-ARCHITECTURE.md)。
+
+
+## 2026-10-09：持久任务与 E2B
+
+| 方案 | 采用方式 | 选择依据 |
+| --- | --- | --- |
+| Procrastinate 3.10.0 | PostgreSQL 事务入队、独立 Worker、停滞作业恢复 | 已有 PostgreSQL，避免增加第二套任务状态；作业只保存 ID |
+| E2B Python SDK 2.53.1 | 基础 Sandbox、文件、进程、暂停恢复、销毁与显式代理 | 复用官方虚拟机隔离和生命周期；客户端工具等待使用小型异步桥接 |
+| Agent Skills | SKILL.md frontmatter、文本资源和不可变版本快照 | 不复制第三方 Skills；保留资源结构并限制路径和容量 |
+| Claude 程序化工具调用 | async 工具、caller、工具结果关联 | 当前网页模型只负责规划，Python 和工具结果真实执行 |
+
+官方资料和边界见 [运行时文档](DURABLE-RUNTIME.md)。取消中的沙箱计入限额，无法确认是否已启动的代码不重放。停滞任务依据 Procrastinate 心跳恢复，运行状态机进一步阻止副作用重复。
+
+Procrastinate 的相同执行锁会让未来计划作业阻塞后续即时作业；因此采用每任务 PostgreSQL 执行锁，增加恢复回归。E2B 禁止外网时，透明网络层可能接受 TCP 连接，隔离验收须检查 TLS 或应用层通信。

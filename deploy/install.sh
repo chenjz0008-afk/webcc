@@ -12,6 +12,7 @@ install -d -m 0755 /opt/clewdr-manager
 if [ "$project_dir" != /opt/clewdr-manager ]; then
   cp "$project_dir"/manager.py "$project_dir"/updater.py "$project_dir"/serve.py "$project_dir"/egress.py "$project_dir"/protocol_errors.py "$project_dir"/api_keys.py "$project_dir"/web_documents.py "$project_dir"/web_files.py "$project_dir"/runtime_limits.py "$project_dir"/cluster_state.py "$project_dir"/shared_limits.py "$project_dir"/postgres_files.py "$project_dir"/node_transport.py "$project_dir"/node_agent.py /opt/clewdr-manager/
   cp -R "$project_dir"/web_tools /opt/clewdr-manager/
+  cp "$project_dir"/task_store.py "$project_dir"/skill_bundles.py "$project_dir"/runtime_queue.py "$project_dir"/runtime_forward.py "$project_dir"/runtime_api.py "$project_dir"/batch_tasks.py "$project_dir"/run_tasks.py "$project_dir"/e2b_runtime.py "$project_dir"/sandbox_runner.py /opt/clewdr-manager/
   cp -R "$project_dir"/static /opt/clewdr-manager/
 fi
 install -d -m 0700 /var/lib/clewdr-manager
