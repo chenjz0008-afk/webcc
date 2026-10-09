@@ -1,0 +1,31 @@
+name: Open shared state release PR
+on:
+  push:
+    branches: [feat/web-file-resources]
+    paths: [.github/workflows/open-release-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh pr list --repo chenjz0008-afk/webcc --head feat/web-file-resources --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            printf '%s\n' "$existing" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cat > /tmp/webcc-pr-body.md <<'BODY'
+          ## 变更
+          PostgreSQL 保存账号、密钥和文件原字节；Redis 共享请求限流；持久账号占用避免跨进程重复分配。新增工具参数样例、结构化 JSON 校验、工具检索、延迟加载和媒体工具往返，更新 MUI Files 权限及对外文档。
+          ## 部署与边界
+          当前生产已有 PostgreSQL 和 Redis。本次部署经过服务器回归的网关模块及前端，保留私有备份并核对源码摘要。节点 Agent 作为候选代码保留，不启用跨服务器生产路由；真实跨主机验证和其他未完成任务见 docs/CURRENT-DELIVERY.md。ClewdR 保持原版；本地 Schema 校验不宣称原生 strict 或完整官方 API 等价。
+          ## 验证
+          验收记录将随部署补充到 docs。账号、sessionKey、代理凭据、真实 API Key 和环境文件不进入仓库。PR 留给用户合并；本临时工作流创建 PR 后删除。
+          BODY
+          gh pr create --repo chenjz0008-afk/webcc --base main --head feat/web-file-resources --title '共享 PostgreSQL 状态、Redis 调度与工具能力扩展' --body-file /tmp/webcc-pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
