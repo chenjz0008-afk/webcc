@@ -6,6 +6,8 @@ E2B 在执行期间输出真实 stdout；MCP 同请求复用连接，支持延�
 
 服务器隔离环境 190 项回归全部通过，无跳过；真实账号、E2B、DeepWiki 与官方 Python SDK 1.12.1 验收通过。stdout 首段 9.17 秒。认证隔离另用受控 MCP 服务验收，不将模拟认证称为 DeepWiki 认证。跨进程竞争、进程终止后锁释放及未知结果防重放通过；第二台物理服务器尚未验收。Brave 严格搜索约束按用户决定暂缓。见 [验收记录](docs/finish-acceptance-2026-10-09.json)。
 
+68262fa 已部署，公网官方 SDK 的引用及 MCP 流式解析通过，80 个运行文件摘要一致。11 个 ClewdR 配置、镜像及容器启动时间未变；临时密钥已清理。备份：/var/backups/webcc/finish-tools-20261009T065838Z。
+
 ## 2026-10-09 · E2B 与持久任务
 
 发布 Batches、Skills 不可变版本、E2B 代码执行、生成文件下载和程序化客户端工具调用。采用官方 E2B SDK、Procrastinate 事务队列和 Agent Skills 结构；原版 ClewdR 保持独立。用量、精确计数、缓存命中和计费对齐按用户要求排除。

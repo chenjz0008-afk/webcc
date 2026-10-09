@@ -56,3 +56,5 @@ MCP 在模型规划校验后发送调用块、远程返回后发送结果；E2B 
 参考：Anthropic API/SDK、MCP Python SDK、Brave Search API、E2B SDK。复杂能力的完成门槛是协议测试加真实调用，不以“已写代码”替代。
 
 验收：190 项回归全部通过，无跳过。官方 Python SDK 1.12.1、真实账号、E2B 和 DeepWiki 验收见 [记录](finish-acceptance-2026-10-09.json)。真实 stdout 首段 9.17 秒，这是一次样本，不是延迟保证。跨进程共享锁、进程中断和防重放已通过；第二台物理服务器尚未验收。
+
+生产发布：68262fa。公网官方 SDK 引用与 MCP SSE 通过；80 个运行文件摘要一致；11 个 ClewdR 容器未改配置、未换镜像、未重启。部署备份：/var/backups/webcc/finish-tools-20261009T065838Z。
