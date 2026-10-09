@@ -58,6 +58,11 @@ def snapshot(store, owner, references):
     for ref in references:
         if not isinstance(ref, dict) or set(ref) != {'skill_id', 'version'} or not all(isinstance(v, str) for v in ref.values()):
             raise FileProblem(400, 'Skill references require skill_id and version')
+        if ref['version'] == 'latest':
+            versions = store.skills(owner, ref['skill_id'])
+            if not versions:
+                raise FileProblem(404, 'Skill version not found')
+            ref = {**ref, 'version': versions[0]['version']}
         bundle = store.skill_version(owner, ref['skill_id'], ref['version'])
         if bundle['name'] in names:
             raise FileProblem(400, 'Duplicate skill name')

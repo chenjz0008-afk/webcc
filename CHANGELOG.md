@@ -1,3 +1,11 @@
+## 2026-10-09 · 标准执行入口、真实增量与平台状态
+
+标准 Messages 自动复用现有引用、MCP 和 E2B 执行器；保留模型与控制字段，标准执行不再需要 experimental_tools 权限。普通请求改读真实 SSE，保留 Thinking、预算截断和网页工具结果。客户端工具使用 ijson/jiter 输出真实增量，Schema 校验成功才完成工具块；输出后失败不自动重放。
+
+新增 WebCC Thinking 状态令牌和来源凭据，绑定调用者并设置到期；上游签名保持原值。来源正文通过指定代理提取，引用逐字核对。Redis 仅加密缓存确定性处理结果，不缓存动态答复或声明模型 KV 缓存。继续复用 PostgreSQL、Redis、Procrastinate、MCP SDK 和 E2B；未修改 ClewdR。
+
+215 项回归通过，无跳过。官方 SDK 真实工具往返得到 120，10.741 秒；Beta SDK 上传文件、Skills 快照执行、生成文件下载与删除通过。真实网页引用、Thinking 与来源历史续问通过。修复真实验收发现的输出目录重复和 Skills latest 解析问题。见 [验收](docs/adapter-acceptance-2026-10-09.json)。部署另行核对。
+
 ## 2026-10-09 · 标准客户端工具与扩展保留
 
 标准 Messages 自定义工具请求自动复用现有工具规划与本地 Schema 校验，不再要求平台模型名或专用请求头。原有显式适配保留。Thinking、Beta、effort 及缓存控制保留；真实 Thinking 与签名可随响应返回和历史传入，不制造签名或缓存命中。适配模式仍等待校验后输出工具 SSE。

@@ -43,8 +43,8 @@ def pdf_pages(encoded):
         PDF_SLOT.release()
 
 
-def prepare(fields):
-    if not isinstance(fields, dict) or set(fields) - {'model', 'messages', 'max_tokens', 'stream', 'system'} or fields.get('model') != 'webcc-citations-v1':
+def prepare(fields, standard=False, cache=None, owner=None):
+    if not isinstance(fields, dict) or not standard and (set(fields) - {'model', 'messages', 'max_tokens', 'stream', 'system'} or fields.get('model') != 'webcc-citations-v1'):
         raise FileProblem(400, 'Use webcc-citations-v1 with supported Messages fields')
     if type(fields.get('stream', False)) is not bool or not isinstance(fields.get('messages'), list):
         raise FileProblem(400, 'Invalid citation request')
@@ -67,7 +67,11 @@ def prepare(fields):
             if source.get('type') == 'text' and set(source) <= {'type', 'data', 'media_type'} and source.get('media_type', 'text/plain') == 'text/plain' and isinstance(source.get('data'), str):
                 kind, pages = 'char_location', [source['data']]
             elif set(source) == {'type', 'media_type', 'data'} and source.get('type') == 'base64' and source.get('media_type') == 'application/pdf':
-                kind, pages = 'page_location', pdf_pages(source['data'])
+                import hashlib
+                if not isinstance(source['data'], str):
+                    raise FileProblem(400, 'Invalid PDF base64')
+                pages = cache.memo(owner, 'pdf-pages', hashlib.sha256(source['data'].encode()).hexdigest(), lambda: pdf_pages(source['data'])) if cache else pdf_pages(source['data'])
+                kind = 'page_location'
             else:
                 raise FileProblem(400, 'Citations support text, text PDF and owned file references')
             if len(sources) >= 8 or not any(p.strip() for p in pages):
@@ -78,11 +82,10 @@ def prepare(fields):
                 'pages': [{'page': i + 1, 'text': p} for i, p in enumerate(pages)]}, ensure_ascii=False)}
     if not sources:
         raise FileProblem(400, 'No citable documents provided')
-    result.update(model='webcc-prompt-v1', stream=False, tools=[], output_config={'format': {'type': 'json_schema', 'schema': SCHEMA}})
+    result.update(model=fields['model'] if standard else 'webcc-prompt-v1', stream=False, tools=[], output_config={**fields.get('output_config', {}), 'format': {'type': 'json_schema', 'schema': SCHEMA}})
     instruction = 'Answer from the supplied documents. Return answer and exact supporting quotes. For each quote provide document_index, page and zero-based Unicode start character in that page. Quote must match the original exactly. Do not use titles or context as evidence.'
-    if not isinstance(result.get('system', ''), str):
-        raise FileProblem(400, 'System must be text')
-    result['system'] = result.get('system', '') + '\n' + instruction
+    system = result.get('system', '')
+    result['system'] = [*system, {'type': 'text', 'text': instruction}] if standard and isinstance(system, list) else system + '\n' + instruction
     bounded_json(result)
     return result, sources
 
@@ -110,21 +113,23 @@ def verify(value, sources):
     return [{'type': 'text', 'text': value['answer'], 'citations': citations}]
 
 
-def messages(handler):
-    if handler.path != '/v1/messages' or handler.headers.get('anthropic-beta'):
+def messages(handler, fields=None, standard=False):
+    if not standard and (handler.path != '/v1/messages' or handler.headers.get('anthropic-beta')):
         raise FileProblem(400, 'Unsupported citation query or beta header')
-    fields = load_json(handler.body(33554432))
+    fields = load_json(handler.body(33554432)) if fields is None else fields
     fields, _ = handler.manager.files.resolve(handler.caller_key or 'platform', fields)
-    request, sources = prepare(fields)
+    request, sources = prepare(fields, standard, handler.manager.processing_cache, handler.caller_key or 'platform')
     handler.adapter = 'verified-citations-v1; platform-generated; buffered'
     watcher = Stream(handler)
     stream = watcher if fields.get('stream') else None
     try:
         if stream:
             stream.start()
-        response = infer(handler.manager, handler.caller_key or 'platform', request, 'prompt-v1', on_check=watcher.check)
-        value = load_json(response['content'][0]['text'])
-        response.update(model='webcc-citations-v1', content=verify(value, sources))
+        response = infer(handler.manager, handler.caller_key or 'platform', request, None if standard else 'prompt-v1', on_check=watcher.check)
+        value = load_json(''.join(b['text'] for b in response['content'] if b['type'] == 'text'))
+        response.update(content=[b for b in response['content'] if b['type'] in {'thinking', 'redacted_thinking'}] + verify(value, sources))
+        if not standard:
+            response['model'] = 'webcc-citations-v1'
         if stream:
             stream.complete(response)
         else:

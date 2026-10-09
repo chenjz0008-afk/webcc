@@ -18,18 +18,18 @@ def cipher(manager):
     return Fernet(base64.urlsafe_b64encode(hashlib.sha256(('webcc:mcp:v1:' + manager.admin_key).encode()).digest()))
 
 
-def submit(handler, fields):
+def submit(handler, fields, standard=False):
     if not handler.manager.tasks:
         raise FileProblem(503, 'MCP checkpoints require the PostgreSQL runtime')
     fields = copy.deepcopy(fields)
     rounds = fields.pop('max_iterations', 3)
     if type(rounds) is not int or not 1 <= rounds <= 4:
         raise FileProblem(400, 'max_iterations must be one to four')
-    servers, sets, params = prepare_request(fields)
+    servers, sets, params = prepare_request(fields, standard)
     owner = handler.caller_key or 'platform'
     encoded = cipher(handler.manager).encrypt(json.dumps({'owner': owner, 'servers': servers}).encode()).decode()
     body = {'credentials': encoded, 'toolsets': sets, 'params': params, 'output': [], 'ledger': {}, 'failed_calls': [],
-            'turns': 0, 'window_start': 0, 'window_turn': 0, 'round_budget': rounds, 'calls': 0, 'phase': 'planning'}
+            'turns': 0, 'window_start': 0, 'window_turn': 0, 'round_budget': rounds, 'calls': 0, 'phase': 'planning', 'standard': standard}
     return handler.manager.tasks.create('mcp', owner, body, enqueue, 600)
 
 
@@ -43,7 +43,7 @@ def resume(manager, identity, owner):
 
 
 def message(item):
-    result = item.get('message') or {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': MODEL,
+    result = item.get('message') or {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': item.get('actual_model', 'unknown') if item.get('standard') else MODEL,
         'stop_reason': 'pause_turn', 'stop_sequence': None, 'usage': item.get('usage') or {'input_tokens': 0, 'output_tokens': 0}}
     return {**result, 'content': item['output'][item.get('window_start', 0):], 'container': {'id': item['id']}}
 
@@ -73,7 +73,7 @@ def process(manager, identity, inference):
         try:
             if item['owner'] != 'platform':
                 scopes = set(manager.api_keys.active(item['owner'])['scopes'])
-                if not {'mcp', 'messages', 'experimental_tools'} <= scopes:
+                if not ({'mcp', 'messages'} | (set() if item.get('standard') else {'experimental_tools'})) <= scopes:
                     raise FileProblem(403, 'MCP owner permissions are no longer available')
             secret = json.loads(cipher(manager).decrypt(item['credentials'].encode()))
             if secret['owner'] != item['owner']:
@@ -90,16 +90,18 @@ def process(manager, identity, inference):
                 params = copy.deepcopy(item['params'])
                 if 'tools' not in params:
                     params.update(tools=tools, messages=history(params.get('messages', []), mapping))
-                    prepare(json.dumps(params).encode())
+                    prepare(json.dumps(params).encode(), standard=item.get('standard', False))
                 # One model turn per job keeps the existing queue fair to sandbox polls.
                 if item['phase'] != 'calling':
                     active()
                     with store.transaction(identity) as (_, current):
                         current.update(state='processing', phase='planning')
-                    reply = inference(manager, item['owner'], params, 'prompt-v1', deadline, active)
+                    reply = inference(manager, item['owner'], params, None if item.get('standard') else 'prompt-v1', deadline, active)
                     pending = [b for b in reply['content'] if b['type'] == 'tool_use']
                     with store.transaction(identity) as (_, current):
-                        current.update(plan=reply, internal_results=[], phase='calling', params=params, usage=reply.get('usage'))
+                        current.update(plan=reply, internal_results=[], phase='calling', params=params, usage=reply.get('usage'), actual_model=reply.get('model', 'unknown'))
+                        if pending:
+                            current['output'].extend(b for b in reply['content'] if b['type'] != 'tool_use')
                         if not pending:
                             current['output'].extend(reply['content'])
                             current.update(state='ended', message=reply)
@@ -134,7 +136,7 @@ def process(manager, identity, inference):
                         bounded_json(current['output'])
                     item = store.get(identity)
                 params['messages'].extend([{'role': 'assistant', 'content': reply['content']}, {'role': 'user', 'content': item['internal_results']}])
-                prepare(json.dumps(params).encode())
+                prepare(json.dumps(params).encode(), standard=item.get('standard', False))
                 with store.transaction(identity) as (db, current):
                     current.update(params=params, phase='planning', turns=current['turns'] + 1, window_turn=current['window_turn'] + 1)
                     if current['turns'] >= 16:
@@ -184,17 +186,17 @@ def route(handler, target):
         raise FileProblem(405, 'Unsupported MCP session operation')
 
 
-def messages(handler, fields):
+def messages(handler, fields, standard=False):
     from message_stream import Stream
     owner = handler.caller_key or 'platform'
     if not handler.manager.tasks:
         raise FileProblem(503, 'MCP checkpoints require PostgreSQL')
     if fields.get('container'):
-        if set(fields) - {'model', 'container', 'messages', 'stream'} or fields.get('model') != MODEL or type(fields.get('stream', False)) is not bool:
+        if not standard and (set(fields) - {'model', 'container', 'messages', 'stream'} or fields.get('model') != MODEL) or type(fields.get('stream', False)) is not bool:
             raise FileProblem(400, 'Resume requires model, container and supported fields')
         item = resume(handler.manager, fields['container'], owner)
     else:
-        item = submit(handler, fields)
+        item = submit(handler, fields, standard)
     handler.adapter = 'durable-mcp-v1; tool-progress'
     watcher = Stream(handler)
     stream = watcher if fields.get('stream') else None
@@ -202,7 +204,7 @@ def messages(handler, fields):
     try:
         if stream:
             stream.start()
-            stream.begin({'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': MODEL,
+            stream.begin({'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'unknown' if standard else MODEL,
                           'container': {'id': item['id']}, 'usage': {'input_tokens': 0, 'output_tokens': 0}})
         while True:
             watcher.check()

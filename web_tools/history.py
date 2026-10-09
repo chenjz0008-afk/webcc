@@ -80,8 +80,8 @@ def check_history(history, tools):
             elif kind in {'thinking', 'redacted_thinking'}:
                 if role != 'assistant':
                     raise ValueError('Thinking history requires an assistant message')
-                fields = {'type', 'thinking', 'signature'} if kind == 'thinking' else {'type', 'data'}
-                if set(block) - fields or any(not isinstance(v, str) for v in block.values()):
+                field = 'thinking' if kind == 'thinking' else 'data'
+                if not isinstance(block.get(field), str) or 'signature' in block and not isinstance(block['signature'], str):
                     raise ValueError('Invalid thinking history')
             elif kind == 'tool_use':
                 if role != 'assistant' or set(block) - {'type', 'id', 'name', 'input', 'cache_control'} or not {'id', 'name', 'input'} <= set(block):

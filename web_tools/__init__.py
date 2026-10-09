@@ -32,13 +32,17 @@ def check_schema(schema):
     Draft202012Validator.check_schema(schema)
 
 
-def check_tools(tools, allow_empty=False):
+def check_tools(tools, allow_empty=False, cache=None, owner=None):
+    if cache:
+        return cache.memo(owner, 'tool-definitions', [tools, allow_empty], lambda: check_tools(tools, allow_empty) or True)
     bounded_json(tools)
     if not isinstance(tools, list) or (not tools and not allow_empty) or len(tools) > 64:
         raise ValueError('Experimental tools require 1 to 64 definitions')
     for tool in tools:
-        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict', 'input_examples', 'defer_loading', 'type', 'cache_control'}:
+        if not isinstance(tool, dict) or set(tool) - {'name', 'description', 'input_schema', 'strict', 'input_examples', 'defer_loading', 'type', 'cache_control', 'allowed_callers'}:
             raise ValueError('Unsupported experimental tool definition')
+        if 'allowed_callers' in tool and (not isinstance(tool['allowed_callers'], list) or not tool['allowed_callers'] or set(tool['allowed_callers']) - {'direct', 'code_execution_20260120', 'code_execution_20260521'}):
+            raise ValueError('Invalid allowed tool callers')
         if tool.get('type', 'custom') != 'custom':
             raise ValueError('Client tools require custom type')
         if 'defer_loading' in tool and type(tool['defer_loading']) is not bool:
@@ -64,8 +68,8 @@ def check_tools(tools, allow_empty=False):
                 Draft202012Validator(tool['input_schema']).validate(example)
 
 
-def build_prompt(tools, history, choice=None, allow_empty=False):
-    check_tools(tools, allow_empty)
+def build_prompt(tools, history, choice=None, allow_empty=False, cache=None, owner=None):
+    check_tools(tools, allow_empty, cache, owner)
     choice = {'type': 'auto'} if choice is None else choice
     check_choice(choice, tools)
     bounded_json(history)
@@ -90,8 +94,8 @@ def build_prompt(tools, history, choice=None, allow_empty=False):
     )
 
 
-def parse_response(text, tools, choice=None, allow_empty=False):
-    check_tools(tools, allow_empty)
+def parse_response(text, tools, choice=None, allow_empty=False, cache=None, owner=None):
+    check_tools(tools, allow_empty, cache, owner)
     choice = {'type': 'auto'} if choice is None else choice
     check_choice(choice, tools)
     if not isinstance(text, str) or len(text.encode('utf-8')) > 131072:

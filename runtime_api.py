@@ -60,14 +60,14 @@ def process(handler):
     handler.respond(200, {'ok': True})
 
 
-def check_permissions(handler, fields):
+def check_permissions(handler, fields, standard=False):
     if not isinstance(fields, dict):
         raise FileProblem(400, 'Runtime request must be an object')
     if handler.caller_key:
         scopes = set(handler.manager.api_keys.active(handler.caller_key)['scopes'])
         needed = {'runs'}
         if 'messages' in fields:
-            needed |= {'messages', 'experimental_tools'}
+            needed |= {'messages'} | (set() if standard else {'experimental_tools'})
         if fields.get('skills'):
             needed.add('skills')
         if fields.get('files') or fields.get('outputs') or 'messages' in fields:
@@ -160,19 +160,19 @@ def skill_route(handler, target, owner):
         raise FileProblem(405, 'Unsupported method')
 
 
-def messages(handler):
-    if handler.headers.get('X-WebCC-Runtime') != 'e2b-v1' or handler.headers.get('X-WebCC-Tools') or handler.headers.get('anthropic-beta') or handler.path != '/v1/messages':
+def messages(handler, fields=None, standard=False):
+    if not standard and (handler.headers.get('X-WebCC-Runtime') != 'e2b-v1' or handler.headers.get('X-WebCC-Tools') or handler.headers.get('anthropic-beta') or handler.path != '/v1/messages'):
         raise FileProblem(400, 'Use X-WebCC-Runtime: e2b-v1 without other adapter or beta headers')
     manager, owner = handler.manager, handler.caller_key or 'platform'
     if not manager.tasks:
         raise FileProblem(503, 'Runtime is disabled')
     handler.adapter = 'e2b-runtime-v1; web-account; stdout-progress'
-    fields = json.loads(handler.body(1048576))
-    if not isinstance(fields, dict) or fields.get('model') != 'webcc-runtime-v1' or type(fields.get('stream', False)) is not bool or set(fields) - {'model', 'messages', 'tools', 'container', 'max_tokens', 'stream'}:
+    fields = json.loads(handler.body(1048576)) if fields is None else fields
+    if not isinstance(fields, dict) or type(fields.get('stream', False)) is not bool or not standard and (fields.get('model') != 'webcc-runtime-v1' or set(fields) - {'model', 'messages', 'tools', 'container', 'max_tokens', 'stream'}):
         raise FileProblem(400, 'Use webcc-runtime-v1 with supported runtime fields')
     container = fields.get('container')
     if isinstance(container, str):
-        check_permissions(handler, {'messages': []})
+        check_permissions(handler, {'messages': []}, standard)
         item = manager.tasks.get(container, owner)
         history = fields.get('messages', [])
         if not isinstance(history, list) or not history or not isinstance(history[-1], dict) or history[-1].get('role') != 'user':
@@ -187,6 +187,8 @@ def messages(handler):
             if not isinstance(container, dict) or set(container) != {'skills'}:
                 raise FileProblem(400, 'Container requires a run ID or explicit skills')
             skills = container['skills']
+            if standard and isinstance(skills, list):
+                skills = [{k: v for k, v in ref.items() if k != 'type'} if isinstance(ref, dict) and ref.get('type') == 'custom' else ref for ref in skills]
         tools = fields.get('tools', [])
         if not isinstance(tools, list) or sum(t.get('name') == 'code_execution' for t in tools if isinstance(t, dict)) != 1:
             raise FileProblem(400, 'Declare one code_execution server tool')
@@ -196,15 +198,27 @@ def messages(handler):
         request = {'messages': fields.get('messages'), 'max_tokens': fields.get('max_tokens', 4096),
                    'tools': [t for t in tools if t['name'] != 'code_execution'], 'skills': skills,
                    'code_execution_type': server['type']}
-        check_permissions(handler, request)
+        if standard:
+            inputs = []
+            for message in fields.get('messages') or []:
+                for block in message.get('content', []) if isinstance(message.get('content'), list) else []:
+                    source = block.get('source', {}) if isinstance(block, dict) else {}
+                    if isinstance(source, dict) and source.get('type') == 'file':
+                        identity = source.get('file_id')
+                        file = manager.files.get(owner, identity)
+                        inputs.append({'file_id': identity, 'path': file[2]})
+            if inputs: request['files'] = inputs
+        check_permissions(handler, request, standard)
         body = validate(request, manager, owner)
+        if standard:
+            body['planner_controls'] = {k: v for k, v in fields.items() if k not in {'messages', 'tools', 'container', 'stream', 'tool_choice'}}
         item = manager.tasks.create('run', owner, body, enqueue, body['timeout_seconds'])
     from message_stream import Stream
     stream = Stream(handler) if fields.get('stream') else None
     try:
         if stream:
             stream.start()
-            stream.begin({'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'webcc-runtime-v1',
+            stream.begin({'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'unknown' if standard else 'webcc-runtime-v1',
                           'container': {'id': item['id'], 'expires_at': __import__('web_files').stamp(item['expires'])},
                           'usage': item.get('planner_usage') or {'input_tokens': 0, 'output_tokens': 0}})
         finish_message(handler, item, owner, stream)
@@ -228,12 +242,15 @@ def messages(handler):
 def finish_message(handler, item, owner, stream=None):
     manager = handler.manager
     deadline = time.monotonic() + min(140, manager.request_seconds)
-    emitted_code, emitted_stdout = False, ''
+    emitted_code, emitted_stdout, emitted_thinking = False, '', False
     tool_id = 'srvtoolu_' + item['id'].removeprefix('run_webcc_')
     def progress():
-        nonlocal emitted_code, emitted_stdout
+        nonlocal emitted_code, emitted_stdout, emitted_thinking
         if not stream:
             return
+        if not emitted_thinking and item.get('code') is not None:
+            for thought in item.get('planner_thinking', []): stream.block(thought)
+            emitted_thinking = True
         if not emitted_code and item.get('code') is not None:
             stream.block({'type': 'server_tool_use', 'id': tool_id, 'name': 'code_execution', 'input': {'code': item['code']}})
             emitted_code = True
@@ -263,7 +280,7 @@ def finish_message(handler, item, owner, stream=None):
             return
         handler.respond(502, {'error': {'type': 'api_error', 'message': 'Runtime task ' + item['state']}, 'container': {'id': item['id']}, 'details': item.get('error')})
         return
-    content = [{'type': 'server_tool_use', 'id': tool_id, 'name': 'code_execution', 'input': {'code': item.get('code', '')}}]
+    content = item.get('planner_thinking', []) + [{'type': 'server_tool_use', 'id': tool_id, 'name': 'code_execution', 'input': {'code': item.get('code', '')}}]
     if item['state'] == 'waiting':
         content.extend(item['pending_tools'])
     else:
@@ -272,12 +289,14 @@ def finish_message(handler, item, owner, stream=None):
                         'content': {'type': 'code_execution_result', 'stdout': result['stdout'], 'stderr': result['stderr'], 'return_code': 0,
                                     'content': [{'type': 'code_execution_output', 'file_id': f['id']} for f in item.get('output_files', [])]}})
         content.append({'type': 'text', 'text': result['stdout'].strip() or 'Execution completed.'})
-    message = {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': 'webcc-runtime-v1',
+    message = {'id': 'msg_' + item['id'], 'type': 'message', 'role': 'assistant', 'model': item.get('actual_model', 'unknown') if item.get('planner_controls') else 'webcc-runtime-v1',
                          'container': {'id': item['id'], 'expires_at': __import__('web_files').stamp(item['expires'])},
                          'content': content, 'stop_reason': 'tool_use' if item['state'] == 'waiting' else 'end_turn', 'stop_sequence': None,
                          **({'usage': item['planner_usage']} if item.get('planner_usage') else {})}
     if stream:
-        for block in content[1:]:
+        for block in content:
+            if block['type'] in {'thinking', 'redacted_thinking', 'server_tool_use'}:
+                continue
             if block['type'] == 'text' and emitted_stdout:
                 continue
             stream.block(block)

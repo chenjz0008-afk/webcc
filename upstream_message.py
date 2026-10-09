@@ -6,7 +6,7 @@ class UnexpectedTool(ValueError):
     pass
 
 
-def read(response, thinking=False):
+def read(response, thinking=False, on_event=None):
     if 'text/event-stream' not in response.getheader('Content-Type', ''):
         raw = response.read(1048577)
         if len(raw) > 1048576 or response.length not in (None, 0):
@@ -26,6 +26,8 @@ def read(response, thinking=False):
         if not line.startswith(b'data: '):
             continue
         event = json.loads(line[6:])
+        if on_event:
+            on_event(event)
         kind = event.get('type')
         if kind == 'error':
             raise ValueError('Upstream stream failed')

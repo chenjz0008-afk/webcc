@@ -191,7 +191,7 @@ print(content)
 | 地址 | `https://165.154.205.213/v1/messages` |
 | 鉴权 | `Authorization: Bearer <API Key>` 或 `x-api-key` |
 | 请求头 | `Content-Type: application/json`；无需专用工具请求头 |
-| `model` | 第 4 节中的模型名，例如 `claude-sonnet-4-6` |
+| `model` | 第 2 节中的模型名，例如 `claude-sonnet-4-6` |
 | `max_tokens` | 正整数，示例使用 1024；实际输出受上游限制 |
 | `tools` | 1—64 个工具，包含 `name`、可选 `description` 和 `input_schema` |
 | `strict` | 工具定义中的可选布尔值，参数采用本地 Schema 校验 |
@@ -203,7 +203,7 @@ print(content)
 
 标准客户端工具请求自动采用 WebCC 工具适配。返回参数经过本地 JSON Schema 校验；`strict=true` 表示参数校验，不提供官方约束采样。响应头 `X-WebCC-Adapter: standard-tools-v1` 标明该策略。原有 `webcc-prompt-v1` 与专用请求头仍可使用，独立密钥需额外具备 `experimental_tools` 权限。
 
-Thinking、effort、Beta 等请求控制保留，上游返回的 Thinking 与签名保留原值。`cache_control` 可随请求传递，网页上游的实际缓存效果尚未确认。响应 `model` 记录上游返回值，无法取得时为 `unknown`。
+Thinking、effort、Beta 等请求控制保留。上游签名原样返回；无签名时返回以 `webccsig_v1_` 开头的平台状态令牌，供本网关校验后续历史，不能用于 Anthropic 官方接口。`cache_control` 可随请求传递；平台缓存复用工具定义和文档解析，不代表模型端缓存。响应 `model` 记录上游返回值，无法取得时为 `unknown`。
 
 ### 9.2 支持范围
 
@@ -321,7 +321,7 @@ print(text)
 
 历史最多 128 条消息，文本提示数据最多 128 KiB，嵌套最多 32 层。附件独立传递，完整请求最多 32 MiB、最多 16 个附件；附件工具请求同时最多 2 个，繁忙时返回 429。工具结果须紧接工具调用，ID 不得缺失、重复或串用；业务修改的幂等控制由调用方负责。
 
-工具流先等待并校验完整上游结果，再输出 SSE；等待期间发送 ping，以 message_stop 结束，失败发送 error 事件。
+标准工具流在上游生成时输出真实 Thinking、文本和 `input_json_delta`。工具参数通过 Schema 校验后才发送 `content_block_stop`；完整消息以 `message_stop` 结束。调用方应等待完整工具块和消息完成后执行工具。流中失败发送 `error`，已输出调用不自动重放。旧 `prompt-v1` 和引用答复保留校验后输出模式。
 
 ### 9.6 参数样例与结构化 JSON
 
@@ -382,7 +382,7 @@ curl --fail-with-body -sS -N --max-time 180 \
   }'
 ```
 
-网页搜索由上游执行，客户端读取最终文本，无需执行返回的 `web_search` 或 `web_fetch`。该功能使用普通 Messages 路径；第 9 节的 `prompt-v1` 用于客户端自定义工具。
+网页搜索由上游执行，返回 `server_tool_use`、`web_search_tool_result` 或 `web_fetch_tool_result`，客户端无需执行这些工具。来源正文通过指定代理读取，引用与提取的原文逐字核对。`webccsource_v1_` 是平台来源凭据，可在本网关回传；并非 Anthropic 来源凭据。严格搜索次数和域名控制暂未启用。
 
 ## 11. 文件资源
 
@@ -473,7 +473,7 @@ POST /v1/runs/{id}/tool_results
 
 提交返回 202，继续查询运行状态。错误结果设置 is_error=true。重复、未知、跨密钥或已取消的结果会被拒绝；批量提交具备事务原子性。
 
-也可在 /v1/messages 使用 X-WebCC-Runtime: e2b-v1、model=webcc-runtime-v1 和 code_execution 工具，让网页模型规划 Python 程序。该模式需 runs、messages、experimental_tools、files 权限，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。程序执行期间通过 text_delta 输出真实 stdout，随后返回 code_execution_tool_result。模型规划和参数校验完成后才返回工具参数，不提供原生 Thinking。此模式是平台执行适配，不是官方沙箱协议的完整替代。
+也可在普通 /v1/messages 声明 code_execution 工具，使用第 2 节模型标识，由网页模型规划 Python 程序，无需专用请求头。标准入口需 runs、messages、files 权限；旧 X-WebCC-Runtime: e2b-v1 入口继续保留，支持 JSON 和 SSE；设置 stream=true 后返回工具参数增量、执行结果和 message_stop，等待期间发送 ping。等待工具时返回 tool_use，客户端通过 container.id 回传 tool_result。超过同步等待期限时，JSON 返回 202；SSE 返回 pause_turn 和 container.id，后续通过 /v1/runs 查询。程序执行期间通过 text_delta 输出真实 stdout，随后返回 code_execution_tool_result。模型规划和参数校验完成后才返回工具参数，不提供原生 Thinking。此模式是平台执行适配，不是官方沙箱协议的完整替代。
 
 ## 15. Skills
 
@@ -498,7 +498,7 @@ JSON 创建返回 id 和 version；SDK 创建返回 latest_version_id。版本�
 
 ## 16. 远程 MCP
 
-独立密钥需要 mcp 权限；Messages 还需要 messages 和 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不写入日志。同步请求结束后关闭连接；持久任务的认证参数加密保存，任务结束、取消或结果未知时删除。更换平台管理密钥后，已有持久任务的认证参数无法解密。
+独立密钥需要 mcp 权限；标准 Messages 还需要 messages 权限，声明 mcp_servers 和 mcp_toolset 即自动接入。旧专用入口仍需要 experimental_tools 权限。服务域名由管理员配置 MANAGER_MCP_HOSTS；HTTPS 连接通过指定代理发送，不转发客户端 IP、User-Agent 或其他请求头。authorization_token 仅用于指定服务，不写入日志。同步请求结束后关闭连接；持久任务的认证参数加密保存，任务结束、取消或结果未知时删除。更换平台管理密钥后，已有持久任务的认证参数无法解密。
 
 | 操作 | 接口 |
 | --- | --- |
@@ -566,4 +566,10 @@ POST /v1/messages 使用 X-WebCC-Tools: citations-v1 与 model=webcc-citations-v
 
 文本引用返回 char_location，字符索引从 0 开始，结束索引不包含在引用内。PDF 返回 page_location，页码从 1 开始，结束页码不包含在引用内。每段引用须与指定文档、指定页面原文逐字匹配；无法验证的结果返回 502。stream=true 返回文本及 citations_delta，校验完成后才输出。
 
-每次最多 8 份文档；PDF 单文件最多 20 MiB、20 页，提取文本最多 64 KiB。不支持加密 PDF、扫描件 OCR 或其他工具策略混用。这是平台定位与校验的引用，不包含官方签名或加密来源信息。
+每次最多 8 份文档；PDF 单文件最多 20 MiB、20 页，提取文本最多 64 KiB。不支持加密 PDF 或扫描件 OCR。标准入口可与客户端工具组合，工具结果回传后再返回经过校验的答复与引用。这是平台定位与校验的引用，不包含官方签名或加密来源信息。
+
+## 18. Thinking 历史与处理缓存
+
+将 assistant 返回的完整 content 原样传入下一轮，包括 Thinking、signature 和工具块。平台状态令牌绑定调用密钥、Thinking 内容和实际模型，24 小时到期；改写内容、使用其他调用密钥或轮换管理密钥后无法恢复。网页未返回 Thinking 时不补写思考内容。
+
+工具定义和 PDF 文本解析缓存默认保存 5 分钟；来源正文缓存 1 分钟。缓存按调用密钥隔离、加密保存，有容量上限；解析失败不缓存，缓存不可用时直接处理。上传文件、删除文件、权限和到期检查每次执行，不被缓存绕过。缓存不保存动态模型答复，也不声明官方模型端缓存命中。
