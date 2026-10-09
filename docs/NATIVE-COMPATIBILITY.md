@@ -39,4 +39,4 @@ Thinking 可包含模型思考摘要。signature 是上游提供的不透明加�
 
 服务器官方 Python SDK 1.12.1 标准工具流式调用通过；客户端实际计算 37+83，保留 assistant 历史并回传结果，第二轮正确回答 120。两轮合计 10.761 秒，仅 messages 权限，无专用请求头。实际返回模型为 claude-sonnet-5-5；这次未返回 Thinking。此前普通通道探测收到 Thinking，但未收到签名。缓存实际复用仍未证实。
 
-当前改动仅在候选环境，尚未部署。详见 [记录](native-compatibility-check-2026-10-09.json)。
+d8adc72 已部署，健康检查通过。备份：/var/backups/webcc/standard-tools-20261009T075347Z。公网官方 SDK 标准工具两轮通过，11.241 秒；测试密钥已撤销删除。11 个 ClewdR 镜像一致，容器均未重启。详见 [记录](native-compatibility-check-2026-10-09.json)。

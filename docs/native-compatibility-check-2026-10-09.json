@@ -1,5 +1,5 @@
 {
-  "candidate_only": true,
+  "candidate_only": false,
   "regression": {
     "tests": 199,
     "passed": 199,
@@ -33,5 +33,17 @@
     "thinking_blocks": 0,
     "signature_received": false,
     "seconds": 10.761
+  },
+  "deployment": {
+    "source_commit": "d8adc72",
+    "healthy": true,
+    "backup": "/var/backups/webcc/standard-tools-20261009T075347Z",
+    "public_sdk_retest": {
+      "pass": true,
+      "seconds": 11.241,
+      "temporary_keys_cleaned": true,
+      "clewdr_images_unchanged": 11,
+      "clewdr_containers_not_restarted": 11
+    }
   }
 }
