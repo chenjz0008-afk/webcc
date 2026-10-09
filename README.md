@@ -35,7 +35,7 @@ flowchart TD
 | `updater.py` | 检查 ClewdR 官方版本、候选容器验证、逐个更新和失败回退 |
 | `frontend/src/pages/` | 工作台、账号、资源、更新和 API 接入页面 |
 | `frontend/src/components/` | 后台布局、账号表单、详情抽屉、凭据字段和复制组件 |
-| `static/` | 服务器快照中的前端构建产物；开发时由 Vite 重新生成 |
+| `static/` | 线上前端构建快照（2026-10-07 同步）；开发时由 Vite 重新生成 |
 | `deploy/` | 安装脚本、systemd 单元、服务器 Nginx 配置和快照清单 |
 | `tests/` | 使用模拟账号服务的后端测试，不需要真实 Cookie |
 | `docs/` | 部署时原 README、后续兼容方案和分支维护说明 |
