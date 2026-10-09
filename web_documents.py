@@ -1,4 +1,4 @@
-"""Inline PDF compatibility for ClewdR web uploads; no native citations or Files."""
+"""PDF and text document conversion for ClewdR web inputs."""
 import base64
 import binascii
 
@@ -26,6 +26,17 @@ def prepare(payload):
             if citations.get('enabled'):
                 raise DocumentProblem('网页通道不提供原生 citations；请关闭该配置')
             source = block.get('source')
+            if isinstance(source, dict) and source.get('type') == 'text':
+                if set(source) - {'type', 'media_type', 'data'} or source.get('media_type', 'text/plain') != 'text/plain' or not isinstance(source.get('data'), str):
+                    raise DocumentProblem('文本 document 需要 text/plain 字符串来源')
+                metadata = []
+                for field in ('title', 'context'):
+                    if field in block:
+                        if not isinstance(block[field], str):
+                            raise DocumentProblem('文档 title/context 必须是文本')
+                        metadata.append(f'Document {field}: {block[field]}')
+                blocks.append({'type': 'text', 'text': '\n'.join(metadata + [source['data']])})
+                continue
             if not isinstance(source, dict) or set(source) != {'type', 'media_type', 'data'} or source.get('type') != 'base64' or source.get('media_type') != 'application/pdf':
                 raise DocumentProblem('网页 PDF 仅支持 application/pdf 的 base64 来源；URL 和 file_id 尚不支持')
             encoded = source['data']

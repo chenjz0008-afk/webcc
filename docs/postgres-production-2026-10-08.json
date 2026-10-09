@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-08",
+  "postgres_deployed": true,
+  "redis_deployed": true,
+  "files_backend": "postgresql-bytea",
+  "backup": "/var/backups/webcc/postgres-20261008T025434Z",
+  "migration": {
+    "verified": true,
+    "accounts": 11,
+    "api_keys": 4,
+    "files": 0,
+    "file_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "public_frontend": 200
+}

@@ -7,7 +7,7 @@ ERROR_TYPES = {400: 'invalid_request_error', 401: 'authentication_error', 402: '
 
 def applies(path):
     route = path.split('?', 1)[0]
-    for prefix in ['/v1/messages', '/code/v1/messages', '/v1/models', '/code/v1/models', '/v1/files', '/v1/skills']:
+    for prefix in ['/v1/messages', '/code/v1/messages', '/v1/models', '/code/v1/models', '/v1/files', '/v1/skills', '/v1/tools/search']:
         if route == prefix or route.startswith(prefix + '/'):
             return True
     return False

@@ -23,6 +23,7 @@ class ApiKeys:
 
     def list(self):
         with self.manager.condition:
+            self.manager.refresh()
             return [self.public(v) for v in self.records.values()]
 
     def create(self, fields):
@@ -37,13 +38,14 @@ class ApiKeys:
             raise KeyProblem(400, '密钥名称不能为空或超过 80 字符')
         if not isinstance(accounts, list) or not accounts or any(not isinstance(v, str) for v in accounts):
             raise KeyProblem(400, '必须指定密钥可以使用的账号')
-        if not isinstance(scopes, list) or not scopes or any(v not in ['messages', 'models', 'experimental_tools'] for v in scopes):
+        if not isinstance(scopes, list) or not scopes or any(v not in ['messages', 'models', 'experimental_tools', 'files'] for v in scopes):
             raise KeyProblem(400, '密钥功能权限无效')
         if type(rpm) is not int or not 1 <= rpm <= 1000:
             raise KeyProblem(400, 'RPM 必须在 1—1000 之间')
         if expiry is not None and (type(expiry) is not int or expiry <= time.time()):
             raise KeyProblem(400, '密钥到期时间必须是未来时间')
         with self.manager.condition:
+            self.manager.refresh()
             if len(self.records) >= 128:
                 raise KeyProblem(409, '密钥数量达到上限')
             if any(v not in self.manager.state['accounts'] for v in accounts):
@@ -60,6 +62,7 @@ class ApiKeys:
 
     def revoke(self, identity):
         with self.manager.condition:
+            self.manager.refresh()
             if identity not in self.records:
                 raise KeyProblem(404, '调用密钥不存在')
             self.records[identity]['revoked'] = True
@@ -67,7 +70,13 @@ class ApiKeys:
             self.manager.save()
 
     def active(self, identity):
-        record = self.records.get(identity)
+        if self.manager.cluster:
+            try:
+                record = self.manager.cluster.key(identity=identity)
+            except Exception:
+                raise KeyProblem(503, '中心鉴权状态不可用') from None
+        else:
+            record = self.records.get(identity)
         if not record or record['revoked'] or (record['expires_at'] is not None and record['expires_at'] <= time.time()):
             raise KeyProblem(401, '调用密钥已失效')
         return record
@@ -75,12 +84,28 @@ class ApiKeys:
     def authenticate(self, token, scope, experimental=False):
         digest = hashlib.sha256(token.encode()).hexdigest()
         with self.manager.condition:
-            record = next((v for v in self.records.values() if hmac.compare_digest(v['hash'], digest)), None)
+            if self.manager.cluster:
+                try:
+                    record = self.manager.cluster.key(digest=digest)
+                except Exception:
+                    raise KeyProblem(503, '中心鉴权状态不可用') from None
+            else:
+                record = next((v for v in self.records.values() if hmac.compare_digest(v['hash'], digest)), None)
             if not record:
                 raise KeyProblem(401, '认证失败')
             record = self.active(record['id'])
+            if not hmac.compare_digest(record['hash'], digest):
+                raise KeyProblem(401, '认证失败')
             if scope not in record['scopes'] or (experimental and 'experimental_tools' not in record['scopes']):
                 raise KeyProblem(403, '调用密钥没有此功能权限')
+            if self.manager.shared_limits:
+                try:
+                    retry = self.manager.shared_limits.admit(record['id'], record['rpm'])
+                except Exception:
+                    raise KeyProblem(503, '共享限流不可用，请稍后重试') from None
+                if retry:
+                    raise KeyProblem(429, '调用密钥请求速率超限', retry)
+                return record['id'], frozenset(record['accounts'])
             now = time.monotonic()
             window = self.windows.setdefault(record['id'], deque())
             while window and now - window[0] >= 60:

@@ -19,13 +19,15 @@
 | 请求头 | X-WebCC-Tools: prompt-v1 |
 | model | webcc-prompt-v1 |
 | max_tokens | 16—8192 |
-| tools | 1—64 个客户端工具，name、description、input_schema，可选 strict 布尔值 |
-| messages | 交替的 user/assistant，支持文本、tool_use、文本 tool_result |
+| tools | 最多 64 个客户端工具，name、description、input_schema；可选 strict、input_examples、defer_loading |
+| messages | 交替的 user/assistant，支持文本、tool_use、tool_result、图片和 PDF 附件 |
 | system | 可选文本 |
 | stream | true 或 false |
 | tool_choice | auto、none、any、tool，可带 disable_parallel_tool_use |
 
-显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking、图像、文档块和额外参数在该模式下明确拒绝。普通模式不进入此适配器。
+显式模型别名表示本平台的提示适配策略。网页上游未证明精确模型身份，不使用官方模型名冒充验证结果。Beta、查询参数、thinking 和未声明的扩展参数在该模式下明确拒绝。附件可使用内联 base64 或当前密钥所属的 file_id；文件管理需要 files 权限。普通模式不进入此适配器。
+
+2026-10-08 已验证 PDF、PNG、JPEG、单帧 GIF 和 WebP 的工具往返，以及 input_examples、output_config.format.json_schema、工具目录检索和显式延迟加载。完整请求格式见 [对外接口文档](../API-PUBLIC.md)。结构化输出采用本地校验。
 
 ## 参数校验
 

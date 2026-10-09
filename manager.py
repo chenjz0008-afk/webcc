@@ -13,6 +13,7 @@ import time
 import tomllib
 import uuid
 from api_keys import ApiKeys, KeyProblem
+from web_files import FileStore, FileProblem
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -209,7 +210,31 @@ class Manager:
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
         self.last_used, self.dispatches = {}, {}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
+        self.cluster = None
+        self.shared_limits = None
+        self.node_id = os.environ.get("MANAGER_NODE_ID", "node-1")
+        self.reservations = {}
+        self.remote_reservations = set()
+        self.nodes = {}
+        if os.environ.get("MANAGER_NODES_FILE"):
+            from node_transport import endpoints
+            self.nodes = endpoints(os.environ["MANAGER_NODES_FILE"])
+        if os.environ.get("MANAGER_DATABASE_URL"):
+            from cluster_state import ClusterState
+            from shared_limits import SharedLimits
+            if not os.environ.get("MANAGER_REDIS_URL"):
+                raise ValueError("Cluster mode requires Redis")
+            self.cluster = ClusterState(os.environ["MANAGER_DATABASE_URL"])
+            self.state = self.cluster.load()
+            self.shared_limits = SharedLimits(os.environ["MANAGER_REDIS_URL"])
+        if self.nodes and not self.cluster:
+            raise ValueError("Node endpoints require PostgreSQL shared state")
         self.api_keys = ApiKeys(self)
+        if self.cluster:
+            from postgres_files import PostgresFiles
+            self.files = PostgresFiles(self.cluster)
+        else:
+            self.files = FileStore(self.data)
         self.image = self.state["update"].get("image", image)
         for account in self.state["accounts"].values():
             account.setdefault("session_imported_at", account.get("created_at", int(time.time())))
@@ -219,21 +244,61 @@ class Manager:
                     account["session_expiry_source"] = "estimated"
                 else:
                     account["session_expiry_source"] = "manual"
-            if account["status"] in {"pending", "updating"}:
+            if not self.cluster and account["status"] in {"pending", "updating"}:
                 account.update(status="paused", reason="上次管理操作未完成，需人工启动")
         self.save()
 
     def save(self):
         with self.condition:
-            private_write(self.path, json.dumps(self.state, ensure_ascii=False, indent=2))
+            if self.cluster:
+                try:
+                    self.cluster.save(self.state)
+                except Exception:
+                    self.refresh()
+                    raise Problem(503, "中心状态写入失败，请重新读取后重试") from None
+            else:
+                private_write(self.path, json.dumps(self.state, ensure_ascii=False, indent=2))
             self.condition.notify_all()
+
+    def refresh(self):
+        with self.condition:
+            self._refresh()
+
+    def _refresh(self):
+        if not self.cluster:
+            return
+        try:
+            latest = self.cluster.load()
+        except Exception:
+            raise Problem(503, "中心状态不可用，拒绝分配账号") from None
+        for kind in ("accounts", "api_keys"):
+            records = self.state.setdefault(kind, {})
+            for identity in set(records) - set(latest[kind]):
+                del records[identity]
+            for identity, body in latest[kind].items():
+                if identity in records:
+                    records[identity].clear()
+                    records[identity].update(body)
+                else:
+                    records[identity] = body
+        self.state["update"] = latest["update"]
+        self.cluster.baseline = json.loads(json.dumps(latest))
 
     @contextmanager
     def operation(self):
         if not self.operations.acquire(blocking=False):
             raise Problem(409, "其他管理操作正在进行，请稍后再试")
         try:
-            yield
+            if self.cluster:
+                from cluster_state import StateConflict
+                try:
+                    with self.cluster.operation(self.node_id):
+                        self.refresh()
+                        yield
+                except StateConflict:
+                    raise Problem(409, "该节点有其他管理操作进行中") from None
+            else:
+                yield
         finally:
             self.operations.release()
 
@@ -359,13 +424,13 @@ class Manager:
                         "proxy": proxy, "check_update": False, "auto_update": False,
                         "max_retries": 5, "skip_restricted": True, "skip_first_warning": False,
                         "skip_second_warning": False, "no_fs": False, "log_to_file": False,
-                        "preserve_chats": False, "web_search": False, "enable_web_count_tokens": False,
+                        "preserve_chats": False, "web_search": True, "enable_web_count_tokens": False,
                         "sanitize_messages": False, "skip_non_pro": False, "skip_normal_pro": False,
                         "skip_rate_limit": True, "use_real_roles": True}
             config = "\n".join(k + " = " + json.dumps(v, ensure_ascii=False) for k, v in settings.items())
             config += "\n\n[[cookie_array]]\ncookie = " + json.dumps(session) + "\n"
             private_write(directory / "clewdr.toml", config)
-            account = {"id": identity, "name": str(fields.get("name", "") or "账号-" + identity)[:80],
+            account = {"id": identity, "node_id": self.node_id, "name": str(fields.get("name", "") or "账号-" + identity)[:80],
                        "container": "clewdr-" + identity, "port": self.free_port(), "directory": str(directory),
                        "key": key, "session_hash": digest, "proxy": proxy_label(proxy),
                        "user_agent": str(fields.get("user_agent", ""))[:512], "os_label": str(fields.get("os_label", ""))[:80],
@@ -514,7 +579,7 @@ class Manager:
     def wait_idle(self, account, seconds=60):
         deadline = time.monotonic() + seconds
         with self.condition:
-            while self.inflight.get(account["id"], 0):
+            while self.inflight.get(account["id"], 0) or (self.cluster and self.cluster.busy(account["id"])):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise Problem(409, "仍有进行中的请求，请稍后重试")
@@ -561,12 +626,30 @@ class Manager:
                 while True:
                     if on_wait:
                         on_wait()
-                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed)]
+                    self.refresh()
+                    eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed) and (a.get("node_id", "node-1") == self.node_id or a.get("node_id", "node-1") in self.nodes)]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
                     if available and self.total < self.max_inflight:
                         account = min(available, key=lambda item: self.last_used.get(item["id"], 0))
+                        if self.cluster:
+                            try:
+                                token = None
+                                for candidate in sorted(available, key=lambda item: self.last_used.get(item["id"], 0)):
+                                    token = self.cluster.reserve(candidate["id"], self.node_id, self.max_inflight, statuses)
+                                    if token:
+                                        account = candidate
+                                        break
+                            except Exception:
+                                raise Problem(503, "中心调度不可用，拒绝分配账号") from None
+                            if not token:
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise Problem(429, "等待可用账号超时")
+                                self.condition.wait(min(.1, remaining))
+                                continue
+                            self.reservations[account["id"]] = token
                         self.cursor += 1
                         self.last_used[account["id"]] = self.cursor
                         self.dispatches[account["id"]] = self.dispatches.get(account["id"], 0) + 1
@@ -580,8 +663,40 @@ class Manager:
             finally:
                 self.waiting -= 1
 
+    def worker_connection(self, account, timeout):
+        node = account.get("node_id", "node-1")
+        if node in self.nodes:
+            from node_transport import NodeConnection
+            try:
+                connection = NodeConnection(self.nodes[node], account["id"], self.reservations[account["id"]], timeout,
+                    on_dispatch=lambda: self.mark_remote_dispatch(account["id"]),
+                    on_rejection=lambda: self.cluster.release_unclaimed(account["id"], connection.reservation))
+            except Exception:
+                self.release(account)
+                raise Problem(503, "节点连接配置不可用") from None
+            return connection
+        if node != self.node_id:
+            self.release(account)
+            raise Problem(503, "账号所在节点未配置，拒绝使用其他节点的本机端口")
+        return http.client.HTTPConnection("127.0.0.1", account["port"], timeout=timeout)
+
+    def mark_remote_dispatch(self, identity):
+        with self.condition:
+            self.remote_reservations.add(identity)
+
     def release(self, account):
         with self.condition:
+            if not self.inflight.get(account["id"], 0):
+                return
+            if self.cluster:
+                token = self.reservations.pop(account["id"], None)
+                remote = account["id"] in self.remote_reservations
+                self.remote_reservations.discard(account["id"])
+                if token and not remote:
+                    try:
+                        self.cluster.release(account["id"], token)
+                    except Exception:
+                        print("reservation_release_failed", account["id"], flush=True)
             self.inflight.pop(account["id"], None)
             self.total -= 1
             self.condition.notify_all()
@@ -591,6 +706,7 @@ class Manager:
 
     def record_failure(self, account, kind, status=None, retry_after=None):
         with self.condition:
+            self.refresh()
             account.update(last_error=kind, last_error_at=int(time.time()))
             if status in {401, 403}:
                 account.update(status="quarantined", reason="上游认证或访问拒绝，HTTP " + str(status))
@@ -609,16 +725,19 @@ class Manager:
 
     def record_success(self, account):
         with self.condition:
+            self.refresh()
             account.update(verified_at=int(time.time()), consecutive_failures=0, cooldown_until=0)
             self.save()
 
     def probe(self, identity):
         account = self.acquire(identity)
-        connection = http.client.HTTPConnection("127.0.0.1", account["port"], timeout=120)
+        connection = self.worker_connection(account, 120)
         try:
             body = json.dumps({"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "Reply with OK."}], "max_tokens": 16, "stream": False})
             connection.request("POST", "/v1/chat/completions", body, {"Authorization": "Bearer " + account["key"], "Content-Type": "application/json", "Accept-Encoding": "identity"})
             response = connection.getresponse()
+            if response.getheader("X-WebCC-Node-Error") == "1":
+                raise Problem(503, "节点拒绝转发，请检查节点服务")
             data = response.read(1024 * 1024)
             if response.status != 200:
                 self.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
@@ -682,7 +801,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             raise ClientGone()
 
-    def authenticate(self, admin=False):
+    def authenticate(self, admin=False, scope=None):
         candidate = self.headers.get("Authorization", "")
         candidate = candidate[7:] if candidate.startswith("Bearer ") else ""
         if not admin:
@@ -691,7 +810,7 @@ class Handler(BaseHTTPRequestHandler):
         if candidate and hmac.compare_digest(candidate.encode(), expected.encode()):
             return
         if not admin and candidate:
-            scope = "models" if self.command == "GET" else "messages"
+            scope = scope or ("models" if self.command == "GET" else "messages")
             self.caller_key, self.allowed_accounts = self.manager.api_keys.authenticate(candidate, scope, bool(self.headers.get("X-WebCC-Tools")))
             return
         raise Problem(401, "认证失败")
@@ -724,6 +843,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.handle_request()
 
+    def do_DELETE(self):
+        self.handle_request()
+
     def handle_request(self):
         self.request_id = uuid.uuid4().hex
         self.caller_key, self.allowed_accounts, self.retry_after, self.adapter = None, None, None, None
@@ -744,6 +866,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {"ok": True})
             elif route.startswith("/admin/"):
                 self.authenticate(admin=True)
+                with self.manager.condition:
+                    self.manager.refresh()
                 if route == "/admin/api-keys" and self.command == "GET":
                     self.respond(200, {"keys": self.manager.api_keys.list()})
                 elif route == "/admin/api-keys" and self.command == "POST":
@@ -777,6 +901,12 @@ class Handler(BaseHTTPRequestHandler):
                     identity, action = match.groups()
                     result = self.manager.check_account_proxy(identity) if action == "proxy-test" else self.manager.probe(identity) if action == "probe" else self.manager.control(identity, action)
                     self.respond(200, result or {"ok": True})
+            elif route == '/v1/tools/search' and self.command == 'POST':
+                from web_tools.discovery import route as tool_search_route
+                tool_search_route(self)
+            elif route == '/v1/files' or route.startswith('/v1/files/'):
+                from web_files import route as file_route
+                file_route(self, target)
             elif (self.command == "GET" and route in GET_ROUTES) or (self.command == "POST" and route in POST_ROUTES):
                 self.authenticate()
                 self.forward()
@@ -786,6 +916,10 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.retry_after = getattr(error, "retry_after", None)
             self.respond(error.status, {"error": {"message": str(error), "type": "manager_error"}})
+        except FileProblem as error:
+            self.retry_after = error.retry_after
+            self.close_connection = True
+            self.respond(error.status, {"error": {"message": str(error)}})
         except (ValueError, TypeError, AttributeError):
             self.close_connection = True
             self.respond(400, {"error": {"message": "请求格式无效"}})
@@ -819,8 +953,11 @@ class Handler(BaseHTTPRequestHandler):
             if urlsplit(self.path).path == '/v1/messages':
                 from web_documents import prepare, DocumentProblem
                 try:
-                    if prepare(payload):
+                    payload, resolved = self.manager.files.resolve(self.caller_key or 'platform', payload)
+                    if prepare(payload) or resolved:
                         body = json.dumps(payload, ensure_ascii=False).encode()
+                        if len(body) > 32 * 1024 * 1024:
+                            raise Problem(413, 'Expanded file references exceed 32 MiB')
                 except DocumentProblem as error:
                     raise Problem(400, str(error)) from None
             del payload
@@ -853,7 +990,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": status in {429, 502, 503, 504} or status >= 500}})
 
     def forward_attempt(self, account, body):
-        connection = http.client.HTTPConnection("127.0.0.1", account["port"], timeout=min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())))
+        connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())))
         sent, stream = False, None
         try:
             headers = {k: self.headers[k] for k in ("Content-Type", "anthropic-version", "anthropic-beta", "Accept") if k in self.headers}
@@ -861,6 +998,8 @@ class Handler(BaseHTTPRequestHandler):
             connection.request(self.command, self.path, body, headers)
             self.upstream_timeout(connection)
             response = connection.getresponse()
+            if response.getheader("X-WebCC-Node-Error") == "1":
+                return 503, "节点暂不可用"
             if response.status >= 400:
                 if response.status in {401, 403, 429} or response.status >= 500:
                     self.manager.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))

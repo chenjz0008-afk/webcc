@@ -1,0 +1,103 @@
+{
+  "media-unit-result.json": {
+    "pass": true,
+    "seconds": 81.561,
+    "output": "........................................................................................................................\n----------------------------------------------------------------------\nRan 120 tests in 80.562s\n\nOK\n"
+  },
+  "media-admission-result.json": {
+    "pass": true,
+    "seconds": 17.113,
+    "output": ".....................................\n----------------------------------------------------------------------\nRan 37 tests in 16.286s\n\nOK\n"
+  },
+  "media-release.json": {
+    "date": "2026-10-07",
+    "tool_media_deployed": true,
+    "base_commit": "a30e2c1",
+    "backup": "/var/backups/webcc/media-20261007T161610Z",
+    "modules": {
+      "web_tools/api.py": "96d788dfc62bcc1ea2a22b0b5fde13c7340be1fe5db8344fa29348edf7da2585",
+      "web_tools/gateway.py": "b6164bab087717551c72c702412285764e4a1866b074b22abef6e49e7dd0050f",
+      "web_tools/media.py": "9337b4ffb952a3a3f57bb552658874cb96963bba2a1896672d40b05fda39d716"
+    },
+    "public_files_list": 200
+  },
+  "media-production-result.json": {
+    "date": "2026-10-07",
+    "public_https": true,
+    "checks": [
+      {
+        "case": "upload",
+        "status": 200,
+        "response": {
+          "id": "file_webcc_3e910c15a97c1a3bcddfa65fcbda56bd",
+          "type": "file",
+          "filename": "webcc-media-proof.pdf",
+          "mime_type": "application/pdf",
+          "size_bytes": 2465,
+          "created_at": "2026-10-07T16:17:54.826390Z",
+          "downloadable": true,
+          "expires_at": null
+        }
+      },
+      {
+        "case": "pdf-and-tool",
+        "status": 200,
+        "response": {
+          "id": "msg_303b18a0aa0a47698596e378db2b48c5",
+          "type": "message",
+          "role": "assistant",
+          "model": "webcc-prompt-v1",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_996bd6c4c3384793a1b77b8b724aa1dc",
+              "name": "save_result",
+              "input": {
+                "value": 120
+              }
+            }
+          ],
+          "stop_reason": "tool_use",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 292,
+            "output_tokens": 20
+          }
+        }
+      },
+      {
+        "case": "saved-result-return",
+        "status": 200,
+        "response": {
+          "id": "msg_1ce1d0313bac45ad84416bfead4a5bd8",
+          "type": "message",
+          "role": "assistant",
+          "model": "webcc-prompt-v1",
+          "content": [
+            {
+              "type": "text",
+              "text": "120"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 413,
+            "output_tokens": 8
+          }
+        }
+      },
+      {
+        "case": "delete",
+        "status": 200,
+        "response": {
+          "id": "file_webcc_3e910c15a97c1a3bcddfa65fcbda56bd",
+          "type": "file_deleted"
+        }
+      }
+    ],
+    "pass_": true,
+    "actual_saved_value": 120,
+    "media_slots": 2
+  }
+}

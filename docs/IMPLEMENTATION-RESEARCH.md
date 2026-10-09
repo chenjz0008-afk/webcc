@@ -86,3 +86,15 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 参照 [官方 strict](https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)、[PDF](https://platform.claude.com/docs/en/build-with-claude/pdf-support) 和 [ClewdR 固定转换实现](https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/claude_web_state/transform.rs)。沿用已调研的 LiteLLM 提示适配思路和 jsonschema，不引入第二套网关。官方约束采样无法由本地参数校验替代，响应显式标记 no-native-strict。
 
 修改前 cc1 七种工具选择通过；PNG 与已有 PDF 上传路径通过，但标准 document 输入被忽略。最小修复是在主项目转换输入，不改 ClewdR。非法编码、URL/file_id、原生引用和扩展在选号前拒绝，失败不计入账号异常；同份合成 PDF 在修改后的独立账号路径复验。完整范围及后续依赖见 [网页能力说明](WEB-ACCOUNT-CAPABILITIES.md)。
+
+## C16 / C19 / C20 · 文件和内置能力（2026-10-07）
+
+文件接口对照当前官方 Files 文档和 Python SDK 的 beta=true 路径，复用 python-multipart 0.0.32 与标准 SQLite。选择轻量平台资源库，保持 ClewdR 零修改。候选 PDF 和文本真实引用均返回 120；下载原字节一致，密钥隔离、删除后拒绝和生产账号库未改通过。实现与差异见 [Files](MANAGED-FILES.md)。
+
+先验证网页内置能力再引入服务：官方说明网页免费账号包含搜索、网页读取、代码执行和文件生成。开启并重载后，线上返回真实 web_search；同账号 bash_tool 已执行且返回正确 CSV 内容。故当前不需要为这两种基本能力购买额外服务。Brave/E2B 保留为协议控制和独立生命周期的候选，不将它们加入生产依赖。版本、费用、源码与测试见 [搜索与沙箱](WEB-SEARCH-SANDBOX.md)。
+
+## 2026-10-07 · 附件与客户端工具组合
+
+对照官方工具结果内容块及 Files 输入引用；复用已有 FileStore 所有权校验、web_documents 的 PDF 转换和原版 ClewdR 媒体上传。不引入另一个解析器、OCR 服务或第二套文件库。工具历史保留附件对应标记，二进制附件单独进入网页请求；模型结果仍经过现有 JSON Schema 与 tool_choice 校验。普通文本历史预算保持 128 KiB，完整请求上限 32 MiB，最多 16 个附件。主机不执行模型生成的命令。
+
+网页沙箱文件调研参考公开 claude-exporter 的组织/会话绑定接口，并核对固定 ClewdR 创建会话的流程。下载前必须证明绑定可取得且会话仍有效；不以 present_files 的路径冒充已下载字节。整体模块边界及验收顺序见 [工具架构](TOOL-CAPABILITY-ARCHITECTURE.md)。

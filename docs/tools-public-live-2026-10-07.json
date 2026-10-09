@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-07",
+  "channel": "public HTTPS from server",
+  "base_url": "https://165.154.205.213",
+  "files_backend_deployed": true,
+  "frontend_files_scope_not_rebuilt": true,
+  "request_count": 19,
+  "all_http_200": true,
+  "cases": [
+    {
+      "case": "web-search",
+      "method": "POST",
+      "status": 200,
+      "seconds": 9.849
+    },
+    {
+      "case": "web-fetch",
+      "method": "POST",
+      "status": 200,
+      "seconds": 9.409
+    },
+    {
+      "case": "cloud-execution",
+      "method": "POST",
+      "status": 200,
+      "seconds": 11.952
+    },
+    {
+      "case": "file-upload",
+      "method": "POST",
+      "status": 200,
+      "seconds": 0.034
+    },
+    {
+      "case": "file-reference",
+      "method": "POST",
+      "status": 200,
+      "seconds": 4.622
+    },
+    {
+      "case": "file-list",
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.012
+    },
+    {
+      "case": "file-metadata",
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.011
+    },
+    {
+      "case": "file-download",
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.011
+    },
+    {
+      "case": "file-delete",
+      "method": "DELETE",
+      "status": 200,
+      "seconds": 0.013
+    },
+    {
+      "case": "selected-strict-tool",
+      "method": "POST",
+      "status": 200,
+      "seconds": 4.79
+    },
+    {
+      "case": "tool-result-return",
+      "method": "POST",
+      "status": 200,
+      "seconds": 4.799
+    },
+    {
+      "case": "choice-auto",
+      "method": "POST",
+      "status": 200,
+      "seconds": 5.851
+    },
+    {
+      "case": "choice-any",
+      "method": "POST",
+      "status": 200,
+      "seconds": 6.025
+    },
+    {
+      "case": "choice-none",
+      "method": "POST",
+      "status": 200,
+      "seconds": 5.522
+    },
+    {
+      "case": "parallel-tools",
+      "method": "POST",
+      "status": 200,
+      "seconds": 5.109
+    },
+    {
+      "case": "parallel-results-return",
+      "method": "POST",
+      "status": 200,
+      "seconds": 5.134
+    },
+    {
+      "case": "pdf-upload",
+      "method": "POST",
+      "status": 200,
+      "seconds": 0.014
+    },
+    {
+      "case": "pdf-reference",
+      "method": "POST",
+      "status": 200,
+      "seconds": 8.028
+    },
+    {
+      "case": "cleanup-file",
+      "method": "DELETE",
+      "status": 200,
+      "seconds": 0.013
+    }
+  ],
+  "native_tools_verified": [
+    "web_search",
+    "web_fetch",
+    "bash_tool",
+    "present_files"
+  ],
+  "cloud_generated_download": false,
+  "private_key_document_in_git": false
+}

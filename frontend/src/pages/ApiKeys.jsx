@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import SecretField from '../components/SecretField.jsx';
 
-const permissions = {messages: '消息调用', models: '模型列表', experimental_tools: '实验工具'};
+const permissions = {messages: '消息调用', models: '模型列表', experimental_tools: '实验工具', files: '文件资源'};
 const initial = {name: '', accounts: [], scopes: ['messages', 'models'], rpm: 60, expiry: ''};
 export default function ApiKeys({api, data, notify}) {
   const [keys, setKeys] = useState([]), [open, setOpen] = useState(false);
@@ -48,7 +48,7 @@ export default function ApiKeys({api, data, notify}) {
       <FormControl><InputLabel>功能权限</InputLabel><Select multiple label="功能权限" value={form.scopes} onChange={event => change('scopes', event.target.value)}>{Object.entries(permissions).map(([scope, label]) => <MenuItem key={scope} value={scope}>{label}</MenuItem>)}</Select></FormControl>
       <TextField label="每分钟最多请求数" type="number" value={form.rpm} onChange={event => change('rpm', event.target.value)} slotProps={{htmlInput: {min: 1, max: 1000}}} />
       <TextField label="到期时间（可选）" type="datetime-local" value={form.expiry} onChange={event => change('expiry', event.target.value)} slotProps={{inputLabel: {shrink: true}}} />
-      <Typography variant="caption" color="text.secondary">实验工具权限只允许调用候选实验入口，不代表生产已开启该能力。</Typography>
+      <Typography variant="caption" color="text.secondary">附件工具调用需要消息调用和实验工具权限；上传、下载和管理文件需要文件资源权限。</Typography>
     </Stack></DialogContent><DialogActions><Button onClick={() => setOpen(false)} disabled={busy}>取消</Button><Button variant="contained" onClick={create} disabled={busy || !form.name.trim() || !form.accounts.length || !form.scopes.length}>创建</Button></DialogActions></Dialog>
     <Dialog open={Boolean(created)} onClose={() => setCreated(null)} fullWidth maxWidth="sm"><DialogTitle>保存调用密钥</DialogTitle><DialogContent><Stack spacing={2} sx={{pt: 1}}><Alert severity="info">完整密钥仅在创建时显示，关闭后无法再次读取。</Alert><SecretField label="API Key" value={created?.key} readOnly copy notify={notify} fullWidth /></Stack></DialogContent><DialogActions><Button onClick={() => setCreated(null)}>完成</Button></DialogActions></Dialog>
   </Stack>;

@@ -7,6 +7,19 @@ MAX_BYTES = 131072
 MAX_DEPTH = 32
 
 
+def load_json(value):
+    def unique(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError('Duplicate JSON key')
+            result[key] = item
+        return result
+    def constant(value):
+        raise ValueError('Non-JSON numeric constant')
+    return json.loads(value, object_pairs_hook=unique, parse_constant=constant)
+
+
 def bounded_json(value):
     def visit(item, depth):
         if depth > MAX_DEPTH:
@@ -43,6 +56,7 @@ def check_history(history, tools):
     if not isinstance(history, list) or not history or len(history) > 128:
         raise ValueError('Experimental history requires 1 to 128 messages')
     schemas = {t['name']: t['input_schema'] for t in tools}
+    visible = {t['name'] for t in tools if not t.get('defer_loading', False)}
     pending, seen, previous = set(), set(), None
     for message in history:
         if not isinstance(message, dict) or set(message) != {'role', 'content'}:
@@ -70,7 +84,7 @@ def check_history(history, tools):
                 if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', identity) or identity in seen:
                     raise ValueError('Invalid or reused tool ID')
                 name = block['name']
-                if not isinstance(name, str) or name not in schemas or not isinstance(block['input'], dict):
+                if not isinstance(name, str) or name not in schemas or name not in visible or not isinstance(block['input'], dict):
                     raise ValueError('Unknown historical tool or invalid input')
                 Draft202012Validator(schemas[name]).validate(block['input'])
                 seen.add(identity)
@@ -85,8 +99,15 @@ def check_history(history, tools):
                     raise ValueError('Tool error flag must be boolean')
                 output = block.get('content', '')
                 if not isinstance(output, str):
-                    if not isinstance(output, list) or any(not isinstance(b, dict) or set(b) != {'type', 'text'} or b.get('type') != 'text' or not isinstance(b.get('text'), str) for b in output):
-                        raise ValueError('Experimental tool results support only text')
+                    if not isinstance(output, list):
+                        raise ValueError('Tool results require text or content blocks')
+                    for item in output:
+                        if isinstance(item, dict) and set(item) == {'type', 'text'} and item['type'] == 'text' and isinstance(item['text'], str):
+                            continue
+                        if not isinstance(item, dict) or set(item) != {'type', 'tool_name'} or item.get('type') != 'tool_reference' or not isinstance(item.get('tool_name'), str) or item['tool_name'] not in schemas:
+                            raise ValueError('Invalid tool reference or result block')
+                        if not block.get('is_error'):
+                            visible.add(item['tool_name'])
                 results.add(identity)
             else:
                 raise ValueError('Unsupported experimental content block')
