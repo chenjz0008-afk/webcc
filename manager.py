@@ -214,6 +214,7 @@ class Manager:
         self.proxy_checks = threading.BoundedSemaphore(2)
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
         self.last_used, self.dispatches = {}, {}
+        self.waiters = {False: [], True: []}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
         self.cluster = None
         self.shared_limits = None
@@ -635,7 +636,19 @@ class Manager:
             if self.waiting >= self.queue_size:
                 raise Problem(429, "等待队列已满")
             self.waiting += 1
+            ticket, background = uuid.uuid4().hex, getattr(self.background, 'enabled', False)
+            waiter = [ticket, set()]
+            self.waiters[background].append(waiter)
+            joined = False
             try:
+                if self.shared_limits:
+                    try:
+                        joined = self.shared_limits.queue_operation('join', ticket, background, self.queue_size,
+                                                                    deadline - time.monotonic())
+                    except Exception:
+                        raise Problem(503, '中心等待队列不可用') from None
+                    if not joined:
+                        raise Problem(429, '等待队列已满')
                 while True:
                     if on_wait:
                         on_wait()
@@ -644,8 +657,20 @@ class Manager:
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
+                    if self.cluster:
+                        try:
+                            busy = self.cluster.busy_accounts(a['id'] for a in available)
+                            available = [a for a in available if a['id'] not in busy]
+                        except Exception:
+                            raise Problem(503, '中心调度不可用，拒绝分配账号') from None
+                    waiter[1] = {a['id'] for a in available}
                     capacity = max(1, self.max_inflight - 1) if getattr(self.background, 'enabled', False) else self.max_inflight
-                    if available and self.total < capacity:
+                    try:
+                        first = self.shared_limits.queue_operation('head' if available else 'pause', ticket, background) if joined else next(
+                            (w[0] for w in self.waiters[background] if any(not self.inflight.get(a) for a in w[1])), None) == ticket
+                    except Exception:
+                        raise Problem(503, '中心等待队列不可用') from None
+                    if first and available and self.total < capacity:
                         account = min(available, key=lambda item: self.last_used.get(item["id"], 0))
                         if self.cluster:
                             try:
@@ -674,9 +699,16 @@ class Manager:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise Problem(429, "等待可用账号超时")
-                    self.condition.wait(min(remaining, .2) if on_wait else remaining)
+                    self.condition.wait(min(remaining, .1) if joined else min(remaining, .2) if on_wait else remaining)
             finally:
+                self.waiters[background].remove(waiter)
                 self.waiting -= 1
+                if joined:
+                    try:
+                        self.shared_limits.queue_operation('leave', ticket, background)
+                    except Exception:
+                        print('queue_cleanup_failed', flush=True)
+                self.condition.notify_all()
 
     def worker_connection(self, account, timeout):
         node = account.get("node_id", "node-1")
@@ -1013,6 +1045,13 @@ class Handler(BaseHTTPRequestHandler):
                     return
             reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
             tools = payload.get('tools') if isinstance(payload, dict) else None
+            if (urlsplit(self.path).path == '/v1/chat/completions' and self.manager.web_tools_enabled and
+                    isinstance(payload, dict) and (tools or payload.get('response_format') or
+                    isinstance(payload.get('messages'), list) and
+                    any(isinstance(m, dict) and (m.get('tool_calls') or m.get('role') == 'tool') for m in payload['messages']))):
+                from openai_tools import forward
+                forward(self, payload)
+                return
             if (urlsplit(self.path).path == '/v1/messages' and self.manager.web_tools_enabled and
                     isinstance(tools, list) and tools and all(isinstance(t, dict) and 'input_schema' in t for t in tools) and not reserved_model):
                 from web_tools.gateway import forward

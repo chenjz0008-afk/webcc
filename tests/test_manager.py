@@ -132,6 +132,8 @@ class ManagerTests(unittest.TestCase):
         for path in ("/v1/messages?beta=true", "/code/v1/messages?beta=true", "/v1/chat/completions?trace=one%20two"):
             with self.subTest(path=path):
                 body = {**self.payload(), "tools": [{"name": "lookup", "input_schema": {"type": "object"}}]}
+                if path.startswith('/v1/chat/completions'):
+                    body = self.payload()
                 if path.startswith('/v1/messages'):
                     key = 'Bearer ' + self.manager.get_account(self.identity)['key']
                     Worker.replies[key] = (200, json.dumps({'model':'actual-model','content':[{'type':'text','text':'{"calls":[{"name":"lookup","input":{}}],"text":""}'}], 'stop_reason':'end_turn','usage':{'input_tokens':1,'output_tokens':1}}).encode())

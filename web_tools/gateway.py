@@ -70,6 +70,8 @@ def _forward(handler, admit, raw=None, standard=False):
             admit()
         request, body = prepare(raw if raw is not None else handler.body(TOOL_REQUEST_MAX), handler.manager.files,
                                 handler.caller_key or 'platform', on_media=admit, standard=standard, cache=handler.manager.processing_cache)
+        if standard and any(t.get('strict') and not t.get('eager_input_streaming') for t in request.get('tools', [])):
+            handler.adapter += '; strict-call-validated'
         from history_state import verify
         verify(handler.manager, handler.caller_key or 'platform', request)
     except FileProblem as problem:
@@ -79,13 +81,13 @@ def _forward(handler, admit, raw=None, standard=False):
         return
     except (ValueError, TypeError, KeyError, RecursionError, ValidationError, SchemaError, RefResolutionError):
         handler.close_connection = True
-        error(400, 'invalid_request_error', 'Unsupported or invalid prompt-v1 request')
+        error(400, 'invalid_request_error', 'Invalid tool request; check tool schemas, choice and paired history')
         return
     except Problem as problem:
         handler.close_connection = True
         error(problem.status, 'invalid_request_error', str(problem))
         return
-    attempted, last = set(), (503, 'overloaded_error', 'No experimental account available')
+    attempted, last = set(), (503, 'overloaded_error', 'No eligible account is available')
     def waiting():
         if not attempted:
             handler.check_caller()
@@ -97,7 +99,8 @@ def _forward(handler, admit, raw=None, standard=False):
                                                on_wait=waiting, allowed=handler.allowed_accounts)
         except Problem as problem:
             if not attempted:
-                last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error', 'No experimental account available')
+                last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error',
+                        'Account queue wait limit reached; retry later' if problem.status == 429 else 'No eligible account is available')
             break
         attempted.add(account['id'])
         connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())))
@@ -105,7 +108,8 @@ def _forward(handler, admit, raw=None, standard=False):
         result, transport = {}, {}
         pending = queue.Queue(maxsize=128)
         incremental = None
-        if standard and request.get('stream') and not request.get('_citation_sources'):
+        from web_tools.api import output_schema
+        if standard and request.get('stream') and not request.get('_citation_sources') and output_schema(request) is None:
             from web_tools.streaming import ToolStream
             incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
 
@@ -208,6 +212,8 @@ def _forward(handler, admit, raw=None, standard=False):
                 from history_state import message as authenticate_history
                 message = authenticate_history(handler.manager, handler.caller_key or 'platform', message)
             except OutputProblem as problem:
+                print(json.dumps({'request_id': handler.request_id, 'error': problem.code,
+                                  'stage': problem.stage, 'stream_started': bool(incremental and incremental.emitted)}), flush=True)
                 last = (502, 'api_error', str(problem), problem.code)
                 if not problem.retry or incremental and incremental.emitted:
                     break
@@ -239,7 +245,8 @@ def _forward(handler, admit, raw=None, standard=False):
             handler.manager.record_success(account)
             return
         if status in (401, 403, 429) or status >= 500:
-            handler.manager.record_failure(account, 'prompt-v1 upstream HTTP/transport', status, result.get('retry_after'))
+            category = 'transport:' + result['failure'] if result.get('failure') else 'upstream_http:' + str(status)
+            handler.manager.record_failure(account, category, status, result.get('retry_after'))
         if status == 400:
             break
     error(*last)

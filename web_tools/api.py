@@ -46,9 +46,9 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=No
     if type(data.get('stream', False)) is not bool:
         raise ValueError('Stream must be boolean')
     schema = output_schema(data)
-    if schema is not None and 'tools' not in data:
+    if (standard or schema is not None) and 'tools' not in data:
         data['tools'] = []
-    prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner)
+    prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard)
     if schema is not None:
         prompt += '\nFor the final answer, text must be a JSON object encoded as a string matching this schema. Keep the calls/text envelope. Schema: ' + json.dumps(schema, ensure_ascii=False)
     system = data.get('system', '')
@@ -78,9 +78,10 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=No
 
 
 class OutputProblem(ValueError):
-    def __init__(self, code, message, retry=True):
+    def __init__(self, code, message, retry=True, stage=None):
         super().__init__(message)
         self.code, self.retry = code, retry
+        self.stage = stage
 
 
 def output_schema(request):
@@ -102,6 +103,7 @@ def output_schema(request):
 
 
 def complete(raw, request, cache=None, owner=None):
+    stage = 'upstream_message'
     try:
         data = load_json(raw)
         if not isinstance(data, dict) or not isinstance(data.get('content'), list):
@@ -118,14 +120,18 @@ def complete(raw, request, cache=None, owner=None):
         if not blocks or any(not isinstance(b, dict) or b.get('type') != 'text' or not isinstance(b.get('text'), str) for b in blocks):
             raise ValueError('Unsupported upstream content')
         schema = output_schema(request)
+        stage = 'tool_envelope_or_arguments'
         parsed = parse_response(''.join(b['text'] for b in blocks), visible_tools(request['tools'], request['messages']), request.get('tool_choice'), allow_empty=request.get('_standard_tools', False) or schema is not None, cache=cache, owner=owner)
         if schema is not None and parsed['stop_reason'] == 'end_turn':
+            stage = 'structured_answer'
             value = load_json(parsed['content'][0]['text'])
             bounded_json(value)
             Draft202012Validator(schema).validate(value)
         if request.get('_citation_sources') and parsed['stop_reason'] == 'end_turn':
+            stage = 'citation'
             from document_citations import verify as verify_citations
             parsed['content'] = verify_citations(value, request['_citation_sources'])
+        stage = 'upstream_usage'
         usage = data.get('usage', {})
         if not isinstance(usage, dict) or any(type(usage.get(k)) is not int or usage[k] < 0 for k in ('input_tokens', 'output_tokens')):
             raise ValueError('Upstream usage unavailable')
@@ -137,7 +143,7 @@ def complete(raw, request, cache=None, owner=None):
     except OutputProblem:
         raise
     except Exception:
-        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation') from None
+        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation', stage=stage) from None
 
 
 

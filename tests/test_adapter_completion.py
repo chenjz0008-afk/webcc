@@ -62,7 +62,8 @@ class IncrementalTests(unittest.TestCase):
         self.assertIn(b'input_json_delta',early);self.assertIn(b'37',early)
         self.assertNotIn(b'content_block_stop',early);self.assertNotIn(b'message_stop',early)
         stream.upstream({'type':'content_block_delta','delta':{'type':'text_delta','text':'"items":[{"word":"北区\\n预算"},true,null,1.5]}}],"text":""}'}})
-        stream.finish({'stop_reason':'tool_use','usage':{'output_tokens':5}})
+        stream.finish({'stop_reason':'tool_use','usage':{'output_tokens':5},'content':[
+            {'type':'tool_use','name':'write','input':{'a':37,'items':[{'word':'北区\n预算'},True,None,1.5]}}]})
         frames=[json.loads(line[6:]) for line in b''.join(output).splitlines() if line.startswith(b'data: ')]
         raw=''.join(e.get('delta',{}).get('partial_json','') for e in frames)
         self.assertEqual(json.loads(raw),{'a':37,'items':[{'word':'北区\n预算'},True,None,1.5]})
@@ -75,7 +76,7 @@ class IncrementalTests(unittest.TestCase):
         stream.upstream({'type':'content_block_stop'})
         for text in ['{"calls":[],"text":"北','区\\n预算','\\u0021"}']:
             stream.upstream({'type':'content_block_delta','delta':{'type':'text_delta','text':text}})
-        stream.finish({'stop_reason':'end_turn','usage':{'output_tokens':5}})
+        stream.finish({'stop_reason':'end_turn','usage':{'output_tokens':5},'content':[{'type':'text','text':'北区\n预算!'}]})
         frames=[json.loads(line[6:]) for line in b''.join(output).splitlines() if line.startswith(b'data: ')]
         text=''.join(e.get('delta',{}).get('text','') for e in frames)
         self.assertEqual(text,'北区\n预算!')

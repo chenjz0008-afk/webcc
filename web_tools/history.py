@@ -1,9 +1,10 @@
 """Validation for the text-only experimental client-tool protocol."""
 import json
 import re
+from runtime_limits import TOOL_CONTEXT_MAX
 from jsonschema import Draft202012Validator
 
-MAX_BYTES = 131072
+MAX_BYTES = TOOL_CONTEXT_MAX
 MAX_DEPTH = 32
 
 
@@ -33,7 +34,8 @@ def bounded_json(value):
     visit(value, 0)
     encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
     if len(encoded.encode('utf-8')) > MAX_BYTES:
-        raise ValueError('Experimental context exceeds byte limit')
+        from web_files import FileProblem
+        raise FileProblem(413, f'Tool context exceeds {MAX_BYTES} UTF-8 bytes; use range reads or file references')
     return encoded
 
 
@@ -52,7 +54,7 @@ def check_choice(choice, tools):
         raise ValueError('Tool name requires selected-tool choice')
 
 
-def check_history(history, tools):
+def check_history(history, tools, allow_historical=False):
     if not isinstance(history, list) or not history or len(history) > 128:
         raise ValueError('Experimental history requires 1 to 128 messages')
     schemas = {t['name']: t['input_schema'] for t in tools}
@@ -90,9 +92,12 @@ def check_history(history, tools):
                 if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', identity) or identity in seen:
                     raise ValueError('Invalid or reused tool ID')
                 name = block['name']
-                if not isinstance(name, str) or name not in schemas or name not in visible or not isinstance(block['input'], dict):
+                if (not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', name) or
+                        not isinstance(block['input'], dict) or name in schemas and name not in visible or
+                        name not in schemas and not allow_historical):
                     raise ValueError('Unknown historical tool or invalid input')
-                Draft202012Validator(schemas[name]).validate(block['input'])
+                if name in schemas:
+                    Draft202012Validator(schemas[name]).validate(block['input'])
                 seen.add(identity)
                 calls.add(identity)
             elif kind == 'tool_result':
