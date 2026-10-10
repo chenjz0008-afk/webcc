@@ -126,7 +126,7 @@ def complete(raw, request, cache=None, owner=None):
         parsed = parse_response(''.join(b['text'] for b in blocks), visible_tools(request['tools'], request['messages']), request.get('tool_choice'), allow_empty=request.get('_standard_tools', False) or schema is not None, cache=cache, owner=owner)
         if schema is not None and parsed['stop_reason'] == 'end_turn':
             stage = 'structured_answer'
-            value = load_json(parsed['content'][0]['text'])
+            value = load_json(''.join(b['text'] for b in parsed['content'] if b['type'] == 'text'))
             bounded_json(value)
             Draft202012Validator(schema).validate(value)
         if request.get('_citation_sources') and parsed['stop_reason'] == 'end_turn':

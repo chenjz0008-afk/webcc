@@ -124,6 +124,17 @@ class EnvelopeTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 parse_response(json.dumps({'calls': [item], 'text': ''}), TOOLS)
 
+    def test_structured_answer_validates_all_text_blocks(self):
+        from web_tools.api import complete, OutputProblem
+        request = {'tools': TOOLS, 'messages': [], 'output_config': {'format': {'type': 'json_schema',
+            'schema': {'type': 'object', 'properties': {'ok': {'const': True}}, 'required': ['ok']}}}}
+        value = {'text': '{"ok":true}', 'calls': [{'type': 'text', 'text': 'extra text'}]}
+        raw = json.dumps({'content': [{'type': 'text', 'text': json.dumps(value)}],
+            'usage': {'input_tokens': 1, 'output_tokens': 1}, 'stop_reason': 'end_turn'})
+        with self.assertRaises(OutputProblem) as raised:
+            complete(raw, request)
+        self.assertEqual(raised.exception.stage, 'structured_answer')
+
 
 class ChatTests(unittest.TestCase):
     def test_parallel_results_and_choice_round_trip(self):
