@@ -130,6 +130,12 @@ curl --fail-with-body --silent --show-error --max-time 180 \
 
 启用原生流式时设置 `stream:true`；响应以 `message_stop` 事件结束，不使用 OpenAI 的 `[DONE]` 标记。
 
+Messages 支持对话中的 `system` 消息、有序工具历史和分批回传的并行工具结果。Chat Completions 中后续加入的 `system`、`developer` 消息也保留原顺序。
+
+`thinking.type=disabled` 时不返回思考内容。若上游在生成正文前已耗尽输出限制，接口返回明确错误，调用方应增加输出上限或重试。
+
+Claude Code 使用 `https://165.154.205.213` 作为 `ANTHROPIC_BASE_URL`，不加 `/v1`。客户端工具由 Claude Code 执行；需要审批的操作仍由客户端权限策略决定。审批模型未返回完整判断时，不视为允许执行。
+
 ## 7. Python 示例
 
 以下示例使用 Python 标准库，运行前设置第 3 节中的环境变量。

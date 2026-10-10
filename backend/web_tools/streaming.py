@@ -184,6 +184,10 @@ class ToolStream:
 
     def upstream(self, value):
         kind = value.get('type')
+        if self.request.get('thinking', {}).get('type') == 'disabled' and (
+                kind == 'content_block_start' and value['content_block'].get('type') in {'thinking', 'redacted_thinking'} or
+                kind == 'content_block_delta' and value['delta'].get('type') in {'thinking_delta', 'signature_delta'}):
+            return
         if kind == 'message_start':
             # Wait for meaningful content so malformed output can still be corrected.
             self.model = value['message'].get('model') or 'unknown'

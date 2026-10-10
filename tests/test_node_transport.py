@@ -51,5 +51,11 @@ class NodeTransportTests(unittest.TestCase):
             connection.getresponse()
             self.assertEqual(calls, ['dispatch', 'rejected'])
 
+    def test_profile_is_an_internal_header_not_a_client_override(self):
+        with patch('node_transport.http.client.HTTPConnection') as transport:
+            connection=NodeConnection({'url':'http://127.0.0.1:9010','token':'node-secret'},'a','r',5,profile='client-tools')
+            connection.request('POST','/v1/messages',b'{}',{'X-WebCC-Worker-Profile':'attacker-profile'})
+            self.assertEqual(transport.return_value.request.call_args.args[3]['X-WebCC-Worker-Profile'],'client-tools')
+
 
 if __name__ == '__main__': unittest.main()

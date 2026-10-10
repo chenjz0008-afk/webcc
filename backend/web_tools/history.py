@@ -54,18 +54,20 @@ def check_choice(choice, tools):
         raise ValueError('Tool name requires selected-tool choice')
 
 
-def check_history(history, tools, allow_historical=False):
+def check_history(history, tools, allow_historical=False, standard=False):
     if not isinstance(history, list) or not history or len(history) > 128:
         raise ValueError('Experimental history requires 1 to 128 messages')
     schemas = {t['name']: t['input_schema'] for t in tools}
     visible = {t['name'] for t in tools if not t.get('defer_loading', False)}
     pending, seen, previous = set(), set(), None
     for message in history:
-        if not isinstance(message, dict) or set(message) != {'role', 'content'}:
+        if not isinstance(message, dict) or not {'role', 'content'} <= set(message) or set(message) - {'role', 'content', *(['cache_control'] if standard else [])}:
             raise ValueError('Unsupported message fields')
         role = message['role']
-        if role not in ('user', 'assistant') or role == previous or previous is None and role != 'user':
+        if role not in ('user', 'assistant', *(['system'] if standard else [])) or (not standard and role == previous) or role == 'assistant' and previous is None:
             raise ValueError('Experimental history must alternate user and assistant')
+        if role == 'assistant' and pending:
+            raise ValueError('Every tool call needs an immediate result')
         content = message['content']
         blocks = [{'type': 'text', 'text': content}] if isinstance(content, str) else content
         if not isinstance(blocks, list) or not blocks:
@@ -122,10 +124,14 @@ def check_history(history, tools, allow_historical=False):
                 results.add(identity)
             else:
                 raise ValueError('Unsupported experimental content block')
+        if role == 'system':
+            if any(block.get('type') != 'text' for block in blocks):
+                raise ValueError('System messages require text blocks')
+            continue
         if role == 'user':
-            if results != pending:
+            pending -= results
+            if pending and (text_seen or not standard):
                 raise ValueError('Every tool call needs an immediate result')
-            pending = set()
         else:
             if len(calls) > 8:
                 raise ValueError('Too many historical tool calls')

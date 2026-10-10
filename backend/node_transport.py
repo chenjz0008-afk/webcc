@@ -16,12 +16,13 @@ def semantic_headers(headers):
 
 
 class NodeConnection:
-    def __init__(self, endpoint, account, reservation, timeout, on_dispatch=None, on_rejection=None):
+    def __init__(self, endpoint, account, reservation, timeout, on_dispatch=None, on_rejection=None, profile=None):
         url = urlsplit(endpoint['url'])
         self.prefix = url.path.rstrip('/')
         self.account, self.reservation, self.token = account, reservation, endpoint['token']
         self.on_dispatch = on_dispatch
         self.on_rejection = on_rejection
+        self.profile = profile
         if url.scheme == 'https':
             context = endpoint.get('_tls_context')
             if context is None:
@@ -44,6 +45,7 @@ class NodeConnection:
             'content-type': 'application/json', **forwarded, 'Authorization': 'Bearer ' + self.token,
             'X-WebCC-Account': self.account, 'X-WebCC-Reservation': self.reservation,
             'X-WebCC-Route': path,
+            **({'X-WebCC-Worker-Profile': self.profile} if self.profile else {}),
         })
 
     def getresponse(self):

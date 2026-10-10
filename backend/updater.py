@@ -61,6 +61,8 @@ def replace_worker(manager, account, image):
     config = Path(account["directory"]) / "clewdr.toml"
     backup = manager.data / "backups" / (account["id"] + "-" + str(time.time_ns()) + ".toml")
     private_write(backup, config.read_text())
+    from worker_profiles import stop
+    stop(manager, account)
     remove(manager, account["container"])
     try:
         manager.run_worker(account, image=image)

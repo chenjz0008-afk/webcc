@@ -53,11 +53,15 @@ def convert(fields):
         role, content = message.get('role'), message.get('content')
         if role in {'system', 'developer'}:
             if isinstance(content, str):
-                system.append({'type': 'text', 'text': content})
+                blocks = [{'type': 'text', 'text': content}]
             elif isinstance(content, list):
-                system.extend(content)
+                blocks = content
             else:
                 raise FileProblem(400, 'System content must be text')
+            if messages:
+                messages.append({'role': 'system', 'content': blocks})
+            else:
+                system.extend(blocks)
             continue
         if role == 'tool':
             blocks = [{'type': 'tool_result', 'tool_use_id': message.get('tool_call_id'),

@@ -1,5 +1,17 @@
 # 实现前调研规则与技术参考
 
+## 2026-10-10 Claude Code 协议修复
+
+[Claude Code 网关协议](https://code.claude.com/docs/en/llm-gateway-protocol)要求兼容消息中的 system、上下文扩展和完整 SSE。WebCC 保留历史顺序；Messages 与 Chat Completions 共用工具验证与流式适配，不创建第二套执行器。
+
+[权限模式](https://code.claude.com/docs/en/permission-modes)说明独立审批请求及无可解析结果时的阻止行为。网关只识别完整的 severity 请求协议，单次最多 30 秒；网页通道内部为该请求保留至少 1024 输出上限，校验真实返回的 0–100 判定。超时、空回复或拒答不会变成允许；这不是原生服务端审批证明。
+
+[ClewdR 转换代码](https://github.com/Xerxes-2/clewdr/blob/master/src/claude_web_state/transform.rs)将对话放入 paste.txt，实际正文来自 custom_prompt，并使用全局 web_search。真实 PDF 测试曾将附件误解为待分析材料。客户端工具规划使用同镜像、同账号代理的独立配置，关闭内置搜索，并以可见指令继续附件中的 API 对话；普通网页搜索继续使用原配置。两种配置共用同一 PostgreSQL 账号租约，不能同时使用一个账号。闲置配置最多保留两个，十分钟未用回收；活动配置受全局并发约束。
+
+[细粒度工具流](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)允许参数增量尚未构成完整 JSON。WebCC 在完成工具块前校验完整参数；已发布的调用不因后续错误自动重放。禁用 Thinking 时移除对应块并重排可见索引；没有可用正文的截断不能显示为空白成功。
+
+[公开工具执行分析](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts)仅作为执行顺序、取消和副作用边界的参考，不作为 Anthropic 私有实现或上游能力的证据。此次未修改或复制 ClewdR 源码。
+
 调研日期：2026-10-06。本文件记录候选方案和采用条件，不表示相关能力已经实现。不同上游权限、服务器资源和更新成本下不存在统一最优项目。
 
 每个待办在编码前补齐以下记录：官方请求与响应约束、至少一个相关成熟实现、适用版本或提交、现有账号真实结果、复用与自行实现的取舍、最小改动范围、成功和失败验收条件。没有证据的功能继续保留在 TODO 中。

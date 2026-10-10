@@ -204,6 +204,7 @@ class Manager:
         self.image, self.api_key, self.admin_key = image, api_key, admin_key
         self.max_inflight, self.queue_size, self.queue_seconds = max_inflight, queue_size, queue_seconds
         self.web_tools_enabled = os.environ.get("MANAGER_WEB_TOOLS_ENABLED", "false").lower() == "true"
+        self.worker_profiles_enabled = os.environ.get('MANAGER_WORKER_PROFILES_ENABLED', 'false').lower() == 'true'
         if self.web_tools_enabled:
             import web_tools.api
         self.retry_attempts = max(1, min(5, int(os.environ.get("MANAGER_RETRY_ATTEMPTS", "3"))))
@@ -532,6 +533,8 @@ class Manager:
                 new_text = re.sub(r"(?m)^proxy\s*=.*$", lambda _: "proxy = " + json.dumps(proxy), old_text)
                 new_text = re.sub(r"(?m)^cookie\s*=.*$", lambda _: "cookie = " + json.dumps(session), new_text)
                 private_write(config_path, new_text)
+                from worker_profiles import stop
+                stop(self, account)
                 self.docker("stop", account["container"])
                 self.docker("rm", account["container"])
                 self.run_worker(account)
@@ -607,6 +610,8 @@ class Manager:
             if action in {"pause", "disable"}:
                 self.set_status(account, "disabled" if action == "disable" else "paused", "管理员标记不可用" if action == "disable" else "管理员暂停")
                 self.wait_idle(account)
+                from worker_profiles import stop
+                stop(self, account)
                 self.docker("stop", account["container"])
             elif action == "resume":
                 if self.expired(account):
@@ -632,7 +637,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
-    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None):
+    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -673,11 +678,13 @@ class Manager:
                     except Exception:
                         raise Problem(503, '中心等待队列不可用') from None
                     if first and available and self.total < capacity:
-                        account = min(available, key=lambda item: self.last_used.get(item["id"], 0))
+                        from worker_profiles import warm
+                        rank = lambda item: (bool(profile) and not warm(item), self.last_used.get(item['id'], 0))
+                        account = min(available, key=rank)
                         if self.cluster:
                             try:
                                 token = None
-                                for candidate in sorted(available, key=lambda item: self.last_used.get(item["id"], 0)):
+                                for candidate in sorted(available, key=rank):
                                     token = self.cluster.reserve(candidate["id"], self.node_id, self.max_inflight, statuses,
                                         background=getattr(self.background, 'enabled', False))
                                     if token:
@@ -712,12 +719,13 @@ class Manager:
                         print('queue_cleanup_failed', flush=True)
                 self.condition.notify_all()
 
-    def worker_connection(self, account, timeout):
+    def worker_connection(self, account, timeout, profile=None):
         node = account.get("node_id", "node-1")
         if node in self.nodes:
             from node_transport import NodeConnection
             try:
                 connection = NodeConnection(self.nodes[node], account["id"], self.reservations[account["id"]], timeout,
+                    profile=profile,
                     on_dispatch=lambda: self.mark_remote_dispatch(account["id"]),
                     on_rejection=lambda: self.cluster.release_unclaimed(account["id"], connection.reservation))
             except Exception:
@@ -727,7 +735,13 @@ class Manager:
         if node != self.node_id:
             self.release(account)
             raise Problem(503, "账号所在节点未配置，拒绝使用其他节点的本机端口")
-        return http.client.HTTPConnection("127.0.0.1", account["port"], timeout=timeout)
+        from worker_profiles import endpoint
+        try:
+            port = endpoint(self, account, profile)
+        except Exception:
+            self.release(account)
+            raise Problem(503, '账号执行配置暂不可用') from None
+        return http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
 
     def mark_remote_dispatch(self, identity):
         with self.condition:
@@ -1038,12 +1052,19 @@ class Handler(BaseHTTPRequestHandler):
             forward(self)
             return
         body = self.body() if self.command == "POST" else None
+        self.classifier_request = False
         if body:
             try:
                 payload = json.loads(body)
             except (ValueError, RecursionError):
                 payload = None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
+                from auxiliary_requests import is_classifier, prepare as prepare_classifier
+                self.classifier_request = is_classifier(payload)
+                self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
+                if self.classifier_request:
+                    payload = prepare_classifier(payload)
+                    body = json.dumps(payload, ensure_ascii=False).encode()
                 from history_state import verify
                 verify(self.manager, self.caller_key or 'platform', payload)
                 from native_events import restore
@@ -1056,7 +1077,9 @@ class Handler(BaseHTTPRequestHandler):
             if (urlsplit(self.path).path == '/v1/chat/completions' and self.manager.web_tools_enabled and
                     isinstance(payload, dict) and (tools or payload.get('response_format') or
                     isinstance(payload.get('messages'), list) and
-                    any(isinstance(m, dict) and (m.get('tool_calls') or m.get('role') == 'tool') for m in payload['messages']))):
+                    any(isinstance(m, dict) and (m.get('tool_calls') or m.get('role') == 'tool' or
+                        i > 0 and m.get('role') in {'system', 'developer'} and any(n.get('role') in {'user', 'assistant'} for n in payload['messages'][:i] if isinstance(n, dict)))
+                        for i, m in enumerate(payload['messages'])))):
                 from openai_tools import forward
                 forward(self, payload)
                 return
@@ -1088,15 +1111,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self.request_id = uuid.uuid4().hex
         self.request_deadline = time.monotonic() + self.manager.request_seconds
+        if self.classifier_request:
+            self.request_deadline = min(self.request_deadline, time.monotonic() + 30)
         attempted = set()
         failure = None
-        for _ in range(self.manager.retry_attempts):
+        for _ in range(1 if self.classifier_request else self.manager.retry_attempts):
             if time.monotonic() >= self.request_deadline:
                 failure = (504, "请求处理超时")
                 break
             try:
                 account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline,
-                                               on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts)
+                                               on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts,
+                                               profile='client-tools' if self.classifier_request and self.manager.worker_profiles_enabled else None)
             except Problem:
                 if failure is None:
                     raise
@@ -1112,7 +1138,12 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": status in {429, 502, 503, 504} or status >= 500}})
 
     def forward_attempt(self, account, body):
-        connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())))
+        try:
+            connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())),
+                profile='client-tools' if getattr(self, 'classifier_request', False) and self.manager.worker_profiles_enabled else None)
+        except Problem:
+            self.manager.release(account)
+            return 503, '账号执行配置暂不可用'
         from request_watch import watch
         try:
             with watch(self, connection) as (_, reason):
@@ -1180,6 +1211,18 @@ class Handler(BaseHTTPRequestHandler):
                     if not valid:
                         self.manager.record_failure(account, "empty_response")
                         return 502, "上游未返回有效正文"
+                if getattr(self, 'native_adapter', False) and not getattr(self, 'include_thinking', True):
+                    payload = json.loads(data)
+                    payload['content'] = [b for b in payload.get('content', []) if b.get('type') not in {'thinking', 'redacted_thinking'}]
+                    if not payload['content'] and payload.get('stop_reason') != 'refusal':
+                        return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
+                    if self.classifier_request:
+                        from auxiliary_requests import validate
+                        try:
+                            validate(payload)
+                        except ValueError:
+                            return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
+                    data = json.dumps(payload, ensure_ascii=False).encode()
                 try:
                     if self.path == '/v1/messages':
                         from capability_policy import model_name
@@ -1267,8 +1310,8 @@ class Handler(BaseHTTPRequestHandler):
     def forward_native(self, account, response, connection):
         from native_events import NativeEvents
         from message_stream import Stream
-        adapter = NativeEvents(self.manager, self.caller_key or 'platform')
-        state, pending, size = StreamState(), [], 0
+        adapter = NativeEvents(self.manager, self.caller_key or 'platform', thinking=getattr(self, 'include_thinking', True))
+        state, visible, pending, size = StreamState(), StreamState(), [], 0
         self.adapter = 'webcc-native-v1'
         output = Stream(self)
         try:
@@ -1281,13 +1324,14 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 state.feed(chunk)
                 normalized = adapter.feed(chunk)
+                visible.feed(normalized)
                 size += len(normalized)
                 if size > 32 * 1024 * 1024:
                     raise ValueError('Messages response exceeds 32 MiB')
                 if self.native_stream_requested:
                     if not output.started:
                         pending.append(normalized)
-                        if state.meaningful or adapter.finished and adapter.result.get('stop_reason') in {'refusal', 'max_tokens'}:
+                        if visible.meaningful or adapter.finished and adapter.result.get('stop_reason') == 'refusal':
                             output.start()
                             for packet in pending:
                                 if packet: output.send(packet)
@@ -1296,9 +1340,17 @@ class Handler(BaseHTTPRequestHandler):
                         output.send(normalized)
             if state.failed or not adapter.finished or not state.meaningful and adapter.result.get('stop_reason') not in {'refusal', 'max_tokens'}:
                 raise http.client.HTTPException('Incomplete native Messages stream')
+            if not visible.meaningful and adapter.result.get('stop_reason') != 'refusal':
+                return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
             if self.native_stream_requested:
                 self.write_stream(b'0\r\n\r\n')
             else:
+                if self.classifier_request:
+                    from auxiliary_requests import validate
+                    try:
+                        validate(adapter.result)
+                    except ValueError:
+                        return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
                 self.respond(200, adapter.result)
             self.manager.record_success(account)
@@ -1311,7 +1363,8 @@ class Handler(BaseHTTPRequestHandler):
             if status == 400 and not output.started:
                 self.respond(400, {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '上游拒绝请求参数'}})
                 return
-            self.manager.record_failure(account, 'native_stream_error', status)
+            if not self.classifier_request:
+                self.manager.record_failure(account, 'native_stream_error', status)
             if not output.started:
                 return status, '账号通道未返回完整 Messages 内容'
             try:
@@ -1376,6 +1429,11 @@ def main():
                       float(os.environ.get("MANAGER_QUEUE_SECONDS", "15")))
     def maintenance():
         while True:
+            try:
+                from worker_profiles import expire
+                expire(manager)
+            except Exception as error:
+                print('worker_profile_cleanup_failed', type(error).__name__, flush=True)
             interval = max(60, int(os.environ.get("MANAGER_UPDATE_SECONDS", "86400")))
             delay = manager.state["update"].get("checked_at", 0) + interval - time.time()
             if delay > 0:

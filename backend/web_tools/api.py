@@ -49,7 +49,7 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=No
     schema = output_schema(data)
     if (standard or schema is not None) and 'tools' not in data:
         data['tools'] = []
-    protocol, prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard, separate_protocol=True)
+    protocol, prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard, separate_protocol=True, standard=standard)
     if schema is not None:
         protocol += '\nFor the final answer, text must be a JSON object encoded as a string matching this schema. Keep the calls/text envelope. Schema: ' + json.dumps(schema, ensure_ascii=False)
     system = data.get('system', '')
@@ -107,17 +107,20 @@ def output_schema(request):
 
 def complete(raw, request, cache=None, owner=None):
     stage = 'upstream_message'
+    terminal = False
     try:
         data = load_json(raw)
         if not isinstance(data, dict) or not isinstance(data.get('content'), list):
             raise ValueError('Invalid upstream message')
-        if request.get('_standard_tools') and data.get('stop_reason') in {'max_tokens', 'refusal'}:
+        terminal = request.get('_standard_tools') and data.get('stop_reason') in {'max_tokens', 'refusal'}
+        thoughts = data.get('_webcc_thinking', []) if (request.get('thinking') or {}).get('type') != 'disabled' else []
+        if terminal and not data['content'] and thoughts:
             return {'id': 'msg_' + uuid4().hex, 'type': 'message', 'role': 'assistant',
-                    'model': data.get('model', 'unknown'), 'content': data.get('_webcc_thinking', []) + data['content'],
+                    'model': data.get('model', 'unknown'), 'content': thoughts,
                     'stop_reason': data['stop_reason'], 'stop_sequence': data.get('stop_sequence'), 'usage': data.get('usage', {})}
-        if data.get('stop_reason') == 'max_tokens':
+        if data.get('stop_reason') == 'max_tokens' and not terminal:
             raise OutputProblem('output_truncated', 'Upstream output reached the token limit', False)
-        if data.get('stop_reason') == 'refusal':
+        if data.get('stop_reason') == 'refusal' and not terminal:
             raise OutputProblem('output_refused', 'Upstream refused the request', False)
         blocks = data['content']
         if not blocks or any(not isinstance(b, dict) or b.get('type') != 'text' or not isinstance(b.get('text'), str) for b in blocks):
@@ -139,13 +142,20 @@ def complete(raw, request, cache=None, owner=None):
         if not isinstance(usage, dict) or any(type(usage.get(k)) is not int or usage[k] < 0 for k in ('input_tokens', 'output_tokens')):
             raise ValueError('Upstream usage unavailable')
         if request.get('_standard_tools'):
-            parsed['content'] = data.get('_webcc_thinking', []) + parsed['content']
+            parsed['content'] = thoughts + parsed['content']
+        if terminal:
+            parsed['stop_reason'] = data['stop_reason']
+            if data['stop_reason'] == 'refusal':
+                parsed['content'] = [b for b in parsed['content'] if b['type'] != 'tool_use']
         return {'id': 'msg_' + uuid4().hex, 'type': 'message', 'role': 'assistant', 'model': data.get('model', 'unknown') if request.get('_standard_tools') else MODEL,
                 **parsed, 'stop_sequence': None,
                 'usage': usage if request.get('_standard_tools') else {k: usage[k] for k in ('input_tokens', 'output_tokens')}}
     except OutputProblem:
         raise
     except Exception as error:
+        if terminal:
+            raise OutputProblem('output_truncated' if data['stop_reason'] == 'max_tokens' else 'output_refused',
+                'Upstream tool output did not contain a complete valid answer', False, stage=stage) from None
         feedback = {'stage': stage}
         if isinstance(error, ValidationError):
             feedback.update(path=list(error.absolute_path), rule=error.validator, detail=error.message[:512])

@@ -61,6 +61,9 @@ class NodeAgent:
             return self.error({'error': 'Shared ownership state unavailable'}, 503)
         if account is None:
             return self.error({'error': 'Account ownership or reservation mismatch'}, 403)
+        profile = request.headers.get('x-webcc-worker-profile')
+        if profile not in (None, 'client-tools'):
+            return self.error({'error': 'Unsupported worker execution profile'}, 400)
         if self.slots.locked():
             return self.error({'error': 'Node capacity exhausted'}, 429)
         await self.slots.acquire()
@@ -79,8 +82,12 @@ class NodeAgent:
                 if len(raw) + len(part) > 32 * 1024 * 1024:
                     return self.error({'error': 'Worker request exceeds 32 MiB'}, 413)
                 raw.extend(part)
+            port = account['port']
+            if profile:
+                from worker_profiles import endpoint
+                port = await asyncio.to_thread(endpoint, self.manager, account, profile)
             upstream = self.client.build_request(request.method,
-                'http://127.0.0.1:' + str(account['port']) + route,
+                'http://127.0.0.1:' + str(port) + route,
                 content=bytes(raw) if request.method == 'POST' else None,
                 headers={'content-type': 'application/json', 'anthropic-version': '2023-06-01', **forwarded,
                          'Authorization': 'Bearer ' + account['key'], 'Accept-Encoding': 'identity'})
