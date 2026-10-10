@@ -1,3 +1,19 @@
+## 2026-10-10 · 外贸工具可靠性候选
+
+Chat Completions 工具声明、结果历史与结构化输出复用 Messages 执行链。strict 调用完整校验后逐个发布，保留有序说明内容；模型纠正获得具体 Schema 路径。复用共享 Redis 队列与 PostgreSQL 租约，不重放已经发布的动作。
+
+CSV 上传、E2B container_upload、办公模板和依赖预检已实现；来源通过同一指定代理解析并固定公开地址，引用截断返回明确错误。工具上下文上限调整为 512KiB，仍保留原请求及媒体独立限制。
+
+237 项服务器回归和真实长文档、双文档、慢工具、取消及大上下文验收通过。其余业务与并发矩阵继续测试，尚未部署。历史失败保留，见[验收](docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)。
+
+## 2026-10-09 · 标准执行入口、真实增量与平台状态
+
+标准 Messages 自动复用现有引用、MCP 和 E2B 执行器；保留模型与控制字段，标准执行不再需要 experimental_tools 权限。普通请求改读真实 SSE，保留 Thinking、预算截断和网页工具结果。客户端工具使用 ijson/jiter 输出真实增量，Schema 校验成功才完成工具块；输出后失败不自动重放。
+
+新增 WebCC Thinking 状态令牌和来源凭据，绑定调用者并设置到期；上游签名保持原值。来源正文通过指定代理提取，引用逐字核对。Redis 仅加密缓存确定性处理结果，不缓存动态答复或声明模型 KV 缓存。继续复用 PostgreSQL、Redis、Procrastinate、MCP SDK 和 E2B；未修改 ClewdR。
+
+215 项回归通过，无跳过。官方 SDK 真实工具往返得到 120，10.741 秒；Beta SDK 上传文件、Skills 快照执行、生成文件下载与删除通过。真实网页引用、Thinking 与来源历史续问通过。修复真实验收发现的输出目录重复和 Skills latest 解析问题。见 [验收](docs/adapter-acceptance-2026-10-09.json)。fefde29 已部署，89 个运行文件摘要一致。公网 SDK 工具两轮通过，14.005 秒；联网流式 Thinking 与 4 条原文引用通过，12.543 秒。11 个 ClewdR 配置、镜像与启动时间未变，临时密钥已清理。备份：/var/backups/webcc/adapter-tools-20261009T125918Z。
+
 ## 2026-10-09 · 标准客户端工具与扩展保留
 
 标准 Messages 自定义工具请求自动复用现有工具规划与本地 Schema 校验，不再要求平台模型名或专用请求头。原有显式适配保留。Thinking、Beta、effort 及缓存控制保留；真实 Thinking 与签名可随响应返回和历史传入，不制造签名或缓存命中。适配模式仍等待校验后输出工具 SSE。

@@ -26,7 +26,7 @@ class BoundaryTests(unittest.TestCase):
         base.Worker.replies['Bearer '+account['key']] = (200,json.dumps(output).encode())
         status, _, raw = self.request('POST','/v1/messages?beta=true',payload,extra={'anthropic-beta':'test-extension'})
         self.assertEqual(status,200)
-        self.assertEqual(json.loads(base.Worker.seen[-1]['body']),payload)
+        self.assertEqual(json.loads(base.Worker.seen[-1]['body']),{**payload, 'stream': True})
         self.assertEqual(base.Worker.seen[-1]['headers']['anthropic-beta'],'test-extension')
         self.assertEqual(json.loads(raw),output)
         self.assert_idle()

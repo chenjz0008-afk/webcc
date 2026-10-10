@@ -28,6 +28,45 @@ class ClusterTests(unittest.TestCase):
     def tearDown(self):
         self.a.pool.close(); self.b.pool.close()
 
+    def test_shared_fifo_is_bounded_and_expired_waiters_do_not_block(self):
+        import time
+        from shared_limits import SharedLimits
+        other = SharedLimits(self.redis_url)
+        self.assertTrue(self.limits.queue_operation('join', 'older', size=2, seconds=.05))
+        self.assertTrue(other.queue_operation('join', 'newer', size=2))
+        self.assertFalse(other.queue_operation('join', 'overflow', size=2))
+        self.assertTrue(self.limits.queue_operation('head', 'older'))
+        self.assertFalse(other.queue_operation('head', 'newer'))
+        self.assertTrue(other.queue_operation('join', 'background', background=True, size=2))
+        self.assertTrue(other.queue_operation('head', 'background', background=True))
+        time.sleep(.07)
+        self.assertTrue(other.queue_operation('head', 'newer'))
+        other.queue_operation('leave', 'newer')
+        other.queue_operation('leave', 'background', background=True)
+        self.assertEqual(other.client.zcard('webcc:queue:{interactive}'), 0)
+
+    def test_waiter_for_busy_account_does_not_block_other_accounts(self):
+        import threading, time
+        from manager import Manager, Problem
+        state = self.a.load(); state['accounts']['b'] = {'id': 'b', 'name': 'B', 'status': 'ready'}; self.a.save(state)
+        with tempfile.TemporaryDirectory() as left, tempfile.TemporaryDirectory() as right, patch.dict(os.environ, {'MANAGER_DATABASE_URL': self.url, 'MANAGER_REDIS_URL': self.redis_url}):
+            one = Manager(left, 'image', 'api', 'admin', queue_seconds=2)
+            two = Manager(right, 'image', 'api', 'admin', queue_seconds=2)
+            held = one.acquire(allowed={'a'}); waiting = threading.Event(); stop = threading.Event(); errors = []
+            def check():
+                waiting.set()
+                if stop.is_set(): raise Problem(499, 'test cancellation')
+            def acquire_busy():
+                try: two.acquire(allowed={'a'}, on_wait=check)
+                except Problem as error: errors.append(error.status)
+            thread = threading.Thread(target=acquire_busy); thread.start(); self.assertTrue(waiting.wait(1)); time.sleep(.05)
+            try:
+                free = one.acquire(allowed={'b'}); self.assertEqual(free['id'], 'b'); one.release(free)
+            finally:
+                stop.set(); one.release(held); thread.join(3); one.cluster.pool.close(); two.cluster.pool.close()
+            self.assertEqual(errors, [499])
+            self.assertEqual(self.limits.client.zcard('webcc:queue:{interactive}'), 0)
+
     def test_independent_fields_merge_and_conflicts_reject(self):
         from cluster_state import StateConflict
         left, right = self.a.load(), self.b.load()

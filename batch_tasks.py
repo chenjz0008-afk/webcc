@@ -27,20 +27,16 @@ def validate_requests(fields, manager, owner, mode):
             raise FileProblem(400, 'Batch requests require model and stream=false')
         if type(params.get('max_tokens')) is not int or not 1 <= params['max_tokens'] <= 8192 or not isinstance(params.get('messages'), list) or not params['messages']:
             raise FileProblem(400, 'Invalid batch Messages parameters')
-        if set(params) - {'model', 'messages', 'max_tokens', 'system', 'temperature', 'top_p', 'top_k', 'stop_sequences', 'stream', 'tools', 'tool_choice', 'output_config'}:
-            raise FileProblem(400, 'Unsupported batch parameter')
-        if not mode and ({'tools', 'tool_choice', 'output_config'} & params.keys()):
-            raise FileProblem(400, 'Batch tools require X-WebCC-Tools: prompt-v1')
         params = copy.deepcopy(params)
         params['stream'] = False
         params, _ = manager.files.resolve(owner, params)
         expanded_size += len(json.dumps(params, ensure_ascii=False).encode())
         if expanded_size > 8388608:
             raise FileProblem(413, 'Expanded batch input exceeds 8 MiB')
-        if mode:
+        if mode or any(isinstance(t, dict) and 'input_schema' in t for t in (params.get('tools') or [])) or isinstance(params.get('output_config'), dict) and params['output_config'].get('format'):
             from web_tools.api import prepare
             try:
-                prepare(json.dumps(params).encode())
+                prepare(json.dumps(params).encode(), standard=not mode)
             except FileProblem:
                 raise
             except Exception:
@@ -106,8 +102,8 @@ def route(handler, target):
         target = target._replace(query=urlencode(params, doseq=True))
     if path == base:
         if handler.command == 'POST':
-            if target.query or handler.headers.get('anthropic-beta'):
-                raise FileProblem(400, 'Batch creation does not accept query or beta extensions')
+            if target.query:
+                raise FileProblem(400, 'Batch creation does not accept pagination parameters')
             mode = handler.headers.get('X-WebCC-Tools')
             if mode not in (None, 'prompt-v1') or mode and not manager.web_tools_enabled:
                 raise FileProblem(400, 'Invalid batch tool mode')

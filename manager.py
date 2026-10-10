@@ -214,6 +214,7 @@ class Manager:
         self.proxy_checks = threading.BoundedSemaphore(2)
         self.inflight, self.total, self.waiting, self.cursor = {}, 0, 0, 0
         self.last_used, self.dispatches = {}, {}
+        self.waiters = {False: [], True: []}
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {"accounts": {}, "update": {}}
         self.cluster = None
         self.shared_limits = None
@@ -235,6 +236,8 @@ class Manager:
         if self.nodes and not self.cluster:
             raise ValueError("Node endpoints require PostgreSQL shared state")
         self.api_keys = ApiKeys(self)
+        from processing_cache import ProcessingCache
+        self.processing_cache = ProcessingCache(self)
         if self.cluster:
             from postgres_files import PostgresFiles
             self.files = PostgresFiles(self.cluster)
@@ -633,7 +636,19 @@ class Manager:
             if self.waiting >= self.queue_size:
                 raise Problem(429, "等待队列已满")
             self.waiting += 1
+            ticket, background = uuid.uuid4().hex, getattr(self.background, 'enabled', False)
+            waiter = [ticket, set()]
+            self.waiters[background].append(waiter)
+            joined = False
             try:
+                if self.shared_limits:
+                    try:
+                        joined = self.shared_limits.queue_operation('join', ticket, background, self.queue_size,
+                                                                    deadline - time.monotonic())
+                    except Exception:
+                        raise Problem(503, '中心等待队列不可用') from None
+                    if not joined:
+                        raise Problem(429, '等待队列已满')
                 while True:
                     if on_wait:
                         on_wait()
@@ -642,8 +657,20 @@ class Manager:
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
+                    if self.cluster:
+                        try:
+                            busy = self.cluster.busy_accounts(a['id'] for a in available)
+                            available = [a for a in available if a['id'] not in busy]
+                        except Exception:
+                            raise Problem(503, '中心调度不可用，拒绝分配账号') from None
+                    waiter[1] = {a['id'] for a in available}
                     capacity = max(1, self.max_inflight - 1) if getattr(self.background, 'enabled', False) else self.max_inflight
-                    if available and self.total < capacity:
+                    try:
+                        first = self.shared_limits.queue_operation('head' if available else 'pause', ticket, background) if joined else next(
+                            (w[0] for w in self.waiters[background] if any(not self.inflight.get(a) for a in w[1])), None) == ticket
+                    except Exception:
+                        raise Problem(503, '中心等待队列不可用') from None
+                    if first and available and self.total < capacity:
                         account = min(available, key=lambda item: self.last_used.get(item["id"], 0))
                         if self.cluster:
                             try:
@@ -672,9 +699,16 @@ class Manager:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise Problem(429, "等待可用账号超时")
-                    self.condition.wait(min(remaining, .2) if on_wait else remaining)
+                    self.condition.wait(min(remaining, .1) if joined else min(remaining, .2) if on_wait else remaining)
             finally:
+                self.waiters[background].remove(waiter)
                 self.waiting -= 1
+                if joined:
+                    try:
+                        self.shared_limits.queue_operation('leave', ticket, background)
+                    except Exception:
+                        print('queue_cleanup_failed', flush=True)
+                self.condition.notify_all()
 
     def worker_connection(self, account, timeout):
         node = account.get("node_id", "node-1")
@@ -789,6 +823,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.manager
 
     def respond(self, status, data, content_type="application/json; charset=utf-8"):
+        if status == 200 and isinstance(data, dict) and data.get('type') == 'message':
+            from history_state import message
+            data = message(self.manager, getattr(self, 'caller_key', None) or 'platform', data)
         if status >= 400 and isinstance(data, dict):
             from protocol_errors import applies, wrap
             if applies(self.path):
@@ -998,8 +1035,23 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(body)
             except (ValueError, RecursionError):
                 payload = None
+            if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
+                from history_state import verify
+                verify(self.manager, self.caller_key or 'platform', payload)
+                from native_events import restore
+                restore(self.manager, self.caller_key or 'platform', payload)
+                from messages_api import dispatch
+                if self.manager.web_tools_enabled and payload.get('model') != 'webcc-prompt-v1' and dispatch(self, payload):
+                    return
             reserved_model = isinstance(payload, dict) and payload.get("model") == "webcc-prompt-v1"
             tools = payload.get('tools') if isinstance(payload, dict) else None
+            if (urlsplit(self.path).path == '/v1/chat/completions' and self.manager.web_tools_enabled and
+                    isinstance(payload, dict) and (tools or payload.get('response_format') or
+                    isinstance(payload.get('messages'), list) and
+                    any(isinstance(m, dict) and (m.get('tool_calls') or m.get('role') == 'tool') for m in payload['messages']))):
+                from openai_tools import forward
+                forward(self, payload)
+                return
             if (urlsplit(self.path).path == '/v1/messages' and self.manager.web_tools_enabled and
                     isinstance(tools, list) and tools and all(isinstance(t, dict) and 'input_schema' in t for t in tools) and not reserved_model):
                 from web_tools.gateway import forward
@@ -1017,6 +1069,11 @@ class Handler(BaseHTTPRequestHandler):
                             raise Problem(413, 'Expanded file references exceed 32 MiB')
                 except DocumentProblem as error:
                     raise Problem(400, str(error)) from None
+            if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
+                self.native_stream_requested = bool(payload.get('stream'))
+                self.native_adapter = True
+                payload['stream'] = True
+                body = json.dumps(payload, ensure_ascii=False).encode()
             del payload
             if reserved_model:
                 self.respond(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "prompt-v1 requires X-WebCC-Tools"}})
@@ -1122,6 +1179,8 @@ class Handler(BaseHTTPRequestHandler):
                 if self.command == "POST":
                     self.manager.record_success(account)
                 return
+            if getattr(self, 'native_adapter', False):
+                return self.forward_native(account, response, connection)
             stream, prefix, prefix_size = StreamState(), [], 0
             while not stream.meaningful and not stream.finished and not stream.failed:
                 self.upstream_timeout(connection)
@@ -1193,6 +1252,61 @@ class Handler(BaseHTTPRequestHandler):
             if not sent:
                 return status, "账号通道连接或读取异常"
             self.close_connection = True
+    def forward_native(self, account, response, connection):
+        from native_events import NativeEvents
+        from message_stream import Stream
+        adapter = NativeEvents(self.manager, self.caller_key or 'platform')
+        state, pending, size = StreamState(), [], 0
+        self.adapter = 'webcc-native-v1'
+        output = Stream(self)
+        try:
+            while True:
+                self.upstream_timeout(connection)
+                chunk = response.read1(65536)
+                if not chunk:
+                    if response.length not in (None, 0):
+                        raise http.client.IncompleteRead(b'')
+                    break
+                state.feed(chunk)
+                normalized = adapter.feed(chunk)
+                size += len(normalized)
+                if size > 32 * 1024 * 1024:
+                    raise ValueError('Messages response exceeds 32 MiB')
+                if self.native_stream_requested:
+                    if not output.started:
+                        pending.append(normalized)
+                        if state.meaningful or adapter.finished and adapter.result.get('stop_reason') in {'refusal', 'max_tokens'}:
+                            output.start()
+                            for packet in pending:
+                                if packet: output.send(packet)
+                            pending.clear()
+                    elif normalized:
+                        output.send(normalized)
+            if state.failed or not adapter.finished or not state.meaningful and adapter.result.get('stop_reason') not in {'refusal', 'max_tokens'}:
+                raise http.client.HTTPException('Incomplete native Messages stream')
+            if self.native_stream_requested:
+                self.write_stream(b'0\r\n\r\n')
+            else:
+                self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
+                self.respond(200, adapter.result)
+            self.manager.record_success(account)
+        except ClientGone:
+            self.close_connection = True
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            if getattr(self, 'interruption', None):
+                raise self.interruption[0]
+            status = state.error_status if state.failed else 504 if isinstance(error, TimeoutError) else 502
+            if status == 400 and not output.started:
+                self.respond(400, {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '上游拒绝请求参数'}})
+                return
+            self.manager.record_failure(account, 'native_stream_error', status)
+            if not output.started:
+                return status, '账号通道未返回完整 Messages 内容'
+            try:
+                output.error('Upstream stream ended before completion')
+            except ClientGone:
+                self.close_connection = True
+
     def upstream_timeout(self, connection):
         if getattr(self, 'interruption', None):
             raise self.interruption[0]

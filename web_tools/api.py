@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 from web_tools import build_prompt, parse_response, check_schema
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 from web_tools.discovery import visible_tools
 from web_tools.media import MAX_REQUEST, separate
 from web_tools.history import bounded_json, load_json
@@ -10,7 +11,7 @@ from web_tools.history import bounded_json, load_json
 MODEL = 'webcc-prompt-v1'
 
 
-def prepare(raw, files=None, owner=None, on_media=None, standard=False):
+def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=None):
     data = load_json(raw)
     if not isinstance(data, dict) or not isinstance(data.get('messages'), list) or any(not isinstance(m, dict) for m in data['messages']):
         raise ValueError('Invalid message structure')
@@ -25,6 +26,14 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False):
                     on_media()
     if files is not None:
         data, _ = files.resolve(owner, data)
+    citation_sources = None
+    if standard and any(isinstance(b, dict) and b.get('type') == 'document' and isinstance(b.get('citations'), dict) and b['citations'].get('enabled')
+                        for m in data['messages'] for b in (m['content'] if isinstance(m.get('content'), list) else [])):
+        from document_citations import prepare as citation_prepare
+        original_tools, original_choice = data.get('tools', []), data.get('tool_choice')
+        data, citation_sources = citation_prepare(data, standard=True, cache=cache, owner=owner)
+        data['tools'] = original_tools
+        if original_choice is not None: data['tool_choice'] = original_choice
     data, attachments = separate(data)
     bounded_json(data)
     if not isinstance(data, dict) or not standard and set(data) - {'model', 'max_tokens', 'messages', 'tools', 'tool_choice', 'stream', 'system', 'output_config'}:
@@ -38,9 +47,9 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False):
     if type(data.get('stream', False)) is not bool:
         raise ValueError('Stream must be boolean')
     schema = output_schema(data)
-    if schema is not None and 'tools' not in data:
+    if (standard or schema is not None) and 'tools' not in data:
         data['tools'] = []
-    prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=schema is not None)
+    prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard)
     if schema is not None:
         prompt += '\nFor the final answer, text must be a JSON object encoded as a string matching this schema. Keep the calls/text envelope. Schema: ' + json.dumps(schema, ensure_ascii=False)
     system = data.get('system', '')
@@ -62,15 +71,19 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False):
     if len(body) > MAX_REQUEST:
         from web_files import FileProblem
         raise FileProblem(413, 'Expanded tool request exceeds 32 MiB')
+    if citation_sources is not None:
+        data['_citation_sources'] = citation_sources
     if standard:
         data['_standard_tools'] = True
     return data, body
 
 
 class OutputProblem(ValueError):
-    def __init__(self, code, message, retry=True):
+    def __init__(self, code, message, retry=True, stage=None, feedback=None):
         super().__init__(message)
         self.code, self.retry = code, retry
+        self.stage = stage
+        self.feedback = feedback
 
 
 def output_schema(request):
@@ -91,7 +104,8 @@ def output_schema(request):
     return schema
 
 
-def complete(raw, request):
+def complete(raw, request, cache=None, owner=None):
+    stage = 'upstream_message'
     try:
         data = load_json(raw)
         if not isinstance(data, dict) or not isinstance(data.get('content'), list):
@@ -108,11 +122,18 @@ def complete(raw, request):
         if not blocks or any(not isinstance(b, dict) or b.get('type') != 'text' or not isinstance(b.get('text'), str) for b in blocks):
             raise ValueError('Unsupported upstream content')
         schema = output_schema(request)
-        parsed = parse_response(''.join(b['text'] for b in blocks), visible_tools(request['tools'], request['messages']), request.get('tool_choice'), allow_empty=schema is not None)
+        stage = 'tool_envelope_or_arguments'
+        parsed = parse_response(''.join(b['text'] for b in blocks), visible_tools(request['tools'], request['messages']), request.get('tool_choice'), allow_empty=request.get('_standard_tools', False) or schema is not None, cache=cache, owner=owner)
         if schema is not None and parsed['stop_reason'] == 'end_turn':
-            value = load_json(parsed['content'][0]['text'])
+            stage = 'structured_answer'
+            value = load_json(''.join(b['text'] for b in parsed['content'] if b['type'] == 'text'))
             bounded_json(value)
             Draft202012Validator(schema).validate(value)
+        if request.get('_citation_sources') and parsed['stop_reason'] == 'end_turn':
+            stage = 'citation'
+            from document_citations import verify as verify_citations
+            parsed['content'] = verify_citations(value, request['_citation_sources'])
+        stage = 'upstream_usage'
         usage = data.get('usage', {})
         if not isinstance(usage, dict) or any(type(usage.get(k)) is not int or usage[k] < 0 for k in ('input_tokens', 'output_tokens')):
             raise ValueError('Upstream usage unavailable')
@@ -123,8 +144,14 @@ def complete(raw, request):
                 'usage': usage if request.get('_standard_tools') else {k: usage[k] for k in ('input_tokens', 'output_tokens')}}
     except OutputProblem:
         raise
-    except Exception:
-        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation') from None
+    except Exception as error:
+        feedback = {'stage': stage}
+        if isinstance(error, ValidationError):
+            feedback.update(path=list(error.absolute_path), rule=error.validator, detail=error.message[:512])
+        elif isinstance(error, ValueError):
+            feedback['detail'] = str(error)[:256]
+        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation',
+                            stage=stage, feedback=feedback) from None
 
 
 

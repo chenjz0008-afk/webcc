@@ -1,1 +1,3 @@
 jsonschema>=4.10,<5
+ijson>=3.4,<4
+jiter==0.17.0

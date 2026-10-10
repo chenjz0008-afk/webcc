@@ -15,10 +15,10 @@ SLOTS = threading.BoundedSemaphore(2)
 MODEL = 'webcc-mcp-v1'
 
 
-def prepare_request(fields):
-    if not isinstance(fields, dict) or set(fields) - {'model', 'max_tokens', 'stream', 'messages', 'system', 'mcp_servers', 'tools'}:
+def prepare_request(fields, standard=False):
+    if not isinstance(fields, dict) or not standard and set(fields) - {'model', 'max_tokens', 'stream', 'messages', 'system', 'mcp_servers', 'tools'}:
         raise FileProblem(400, 'Unsupported MCP Messages fields')
-    if fields.get('model') != MODEL or type(fields.get('stream', False)) is not bool:
+    if not standard and fields.get('model') != MODEL or type(fields.get('stream', False)) is not bool:
         raise FileProblem(400, 'Use webcc-mcp-v1 and a boolean stream field')
     servers, sets = fields.get('mcp_servers'), fields.get('tools')
     if not isinstance(servers, list) or not 1 <= len(servers) <= 2 or not isinstance(sets, list) or len(sets) != len(servers):
@@ -33,8 +33,9 @@ def prepare_request(fields):
         raise FileProblem(400, 'MCP toolsets must match server names')
     for settings in sets:
         configured_tools([], settings)
-    params = {k: copy.deepcopy(fields[k]) for k in ('max_tokens', 'messages', 'system') if k in fields}
-    params.update(model='webcc-prompt-v1', stream=False)
+    params = ({k: copy.deepcopy(v) for k, v in fields.items() if k not in {'mcp_servers', 'tools', 'container'}} if standard else
+              {k: copy.deepcopy(fields[k]) for k in ('max_tokens', 'messages', 'system') if k in fields})
+    params.update(model=fields['model'] if standard else 'webcc-prompt-v1', stream=False)
     bounded_json(params)
     return servers, sets, params
 

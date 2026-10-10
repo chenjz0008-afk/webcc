@@ -9,6 +9,9 @@ def integer(name, default, minimum, maximum):
     return int(raw)
 
 
+TOOL_CONTEXT_MAX = integer('MANAGER_TOOL_CONTEXT_BYTES', 524288, 131072, 2097152)
+
+
 FILE_MAX = integer('MANAGER_FILE_MAX_BYTES', 20 * 1024**2, 1, 20 * 1024**2)
 FILES_PER_KEY = integer('MANAGER_FILES_PER_KEY', 128, 1, 1024)
 OWNER_BYTES = integer('MANAGER_FILES_OWNER_BYTES', 256 * 1024**2, FILE_MAX, 1024**3)

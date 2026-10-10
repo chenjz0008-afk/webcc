@@ -56,15 +56,19 @@ def validate(fields, manager, owner):
     outputs = fields.get('outputs', [])
     if not isinstance(outputs, list) or any(not isinstance(v, str) for v in outputs) or len(outputs) > 8 or len(set(outputs)) != len(outputs):
         raise FileProblem(400, 'Use at most eight unique output paths')
+    outputs = [path.removeprefix('output/') for path in outputs]
+    if len(set(outputs)) != len(outputs):
+        raise FileProblem(400, 'Duplicate output artifact path')
     for path in outputs:
         safe_path(path)
-    inputs = fields.get('files', [])
+    inputs = copy.deepcopy(fields.get('files', []))
     if not isinstance(inputs, list) or len(inputs) > 8:
         raise FileProblem(400, 'Use at most eight input files')
     names, input_bytes = set(), 0
     for file in inputs:
         if not isinstance(file, dict) or set(file) != {'file_id', 'path'}:
             raise FileProblem(400, 'Input files require file_id and path')
+        file['path'] = file['path'].removeprefix('input/')
         safe_path(file['path'])
         if file['path'] in names:
             raise FileProblem(400, 'Duplicate input path')
@@ -82,8 +86,10 @@ def plan(manager, item, inference):
     instruction = ('Write a Python program for the requested task. It will run in an isolated sandbox. '
         'Client tools are async functions named as declared, take one dict, return a string; use top-level await or asyncio.gather. '
         'Do not execute website tools. Do not invent tool results. Files are under input/. '
+        'Use Python standard libraries where suitable. The configured office template also provides pandas, numpy, openpyxl and pypdf. '
+        'The sandbox cannot install packages or access the internet. Do not assume other dependencies. '
         'Selected Skills are under skills/<name>/; read resources when needed. '
-        'Print the final answer or execution summary. Write only requested artifacts under output/. '
+        'Print the final answer or execution summary. Write only requested artifacts under output/. The outputs list uses paths relative to output/, without the output/ prefix. '
         'Return execute_python with code and outputs. The executor will really run it. Client tool definitions: ' + json.dumps(descriptions))
     for skill in item['skill_snapshots']:
         instruction += '\nSkill ' + skill['name'] + ': ' + skill['instructions']
@@ -94,14 +100,24 @@ def plan(manager, item, inference):
     request = {'model': 'webcc-prompt-v1', 'max_tokens': min(8192, item.get('max_tokens', 4096)),
                'messages': item['messages'], 'system': instruction, 'tools': [tool],
                'tool_choice': {'type': 'tool', 'name': 'execute_python', 'disable_parallel_tool_use': True}}
-    message = inference(manager, item['owner'], request, 'prompt-v1')
+    controls = copy.deepcopy(item.get('planner_controls', {}))
+    if controls:
+        system = controls.pop('system', '')
+        request.update(controls)
+        request['system'] = [*system, {'type': 'text', 'text': instruction}] if isinstance(system, list) else system + '\n' + instruction
+    message = inference(manager, item['owner'], request, None if controls else 'prompt-v1')
     item['planner_usage'] = copy.deepcopy(message.get('usage'))
+    item['actual_model'] = message.get('model', 'unknown')
+    item['planner_thinking'] = [b for b in message['content'] if b['type'] in {'thinking', 'redacted_thinking'}]
     calls = [b for b in message['content'] if b['type'] == 'tool_use']
     if len(calls) != 1 or calls[0]['name'] != 'execute_python':
         raise FileProblem(502, 'Model did not produce a valid execution plan')
     code, outputs = calls[0]['input']['code'], calls[0]['input']['outputs']
     if not code.strip() or len(code.encode()) > 65536 or len(set(outputs)) != len(outputs):
         raise FileProblem(502, 'Model execution plan exceeds limits')
+    outputs = [path.removeprefix('output/') for path in outputs]
+    if len(set(outputs)) != len(outputs):
+        raise FileProblem(502, 'Duplicate output artifact path')
     for path in outputs:
         safe_path(path)
     return code, outputs
@@ -192,7 +208,7 @@ def process(manager, identity, inference, provider):
                     code, outputs = plan(manager, item, inference)
                     item.update(code=code, outputs=outputs)
                     with store.transaction(identity) as (_, current):
-                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'], planner_usage=item.get('planner_usage'))
+                        current.update(phase='creating', expires=time.time() + item['timeout_seconds'], planner_usage=item.get('planner_usage'), actual_model=item.get('actual_model', 'unknown'), planner_thinking=item.get('planner_thinking', []))
                 seconds = item['timeout_seconds']
                 sandbox = provider.create(identity, seconds)
                 with store.transaction(identity) as (_, current):

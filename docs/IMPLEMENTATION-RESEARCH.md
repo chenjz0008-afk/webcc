@@ -112,3 +112,19 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 官方资料和边界见 [运行时文档](DURABLE-RUNTIME.md)。取消中的沙箱计入限额，无法确认是否已启动的代码不重放。停滞任务依据 Procrastinate 心跳恢复，运行状态机进一步阻止副作用重复。
 
 Procrastinate 的相同执行锁会让未来计划作业阻塞后续即时作业；因此采用每任务 PostgreSQL 执行锁，增加恢复回归。E2B 禁止外网时，透明网络层可能接受 TCP 连接，隔离验收须检查 TLS 或应用层通信。
+
+## 2026-10-10 外贸验收修复
+
+复用 Messages 工具适配，新增 Chat Completions 的薄转换层；保持客户端真实执行、工具 ID 配对和本地参数校验。工具输出中的等价重复名称、已知 `tool_use` 元数据和说明文本分别处理，业务字段不猜测修复。
+
+- [Claude 工具流文档](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)：细粒度输入可能是不完整 JSON，需累计、检查停止原因后执行。`strict` 调用在 WebCC 中逐调用完整校验后发布；普通增量仍保留。Thinking 在工具封装可用前暂存，避免无效规划已经提交而无法纠正。不会将参数校验后的输出声称为逐字符生成。
+- [Claude 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)：网页通道的本地校验与官方约束采样不同；引用输出截断归为生成失败，不能报成用户入参错误。
+- [Redis Lua](https://redis.io/docs/latest/develop/programmability/eval-intro/)：复用既有 Redis 的原子脚本建立共享 FIFO 等待顺序，保留 PostgreSQL 的最终账号占用裁决。交互与后台分队列；受限账号正在占用的等待者让出入口，避免阻塞其他空闲账号。队列有界、取消清除、失联票据到期；Redis 故障不绕过调度。
+- [E2B 模板](https://docs.e2b.dev/template/quickstart)：固定办公依赖模板，执行前检查导入；运行中不安装依赖或盲目重放程序。
+- 来源验证使用同一显式代理获取 DNS 地址并固定公开 HTTPS 地址，抓取与解析均限制为 2 MiB；逐字引用仍复用现有定位器。
+
+Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 次转换/校验/流封装组合的中位耗时约 0.37 ms、P95 约 0.44 ms；这仅是局部 CPU 测量，不替代服务器端到端结果。后续按网关 CPU、排队与上游耗时分别决定是否更换组件语言。
+
+进一步核对用户提供仓库的 [`toolExecution.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/toolExecution.ts)：执行前 `inputSchema.safeParse`，失败经 `formatZodValidationError` 形成模型可见错误；结合 [`StreamingToolExecutor.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 的 queued/executing/completed/yielded 状态和 [并行结果恢复分析](https://github.com/liuup/claude-code-analysis/blob/main/analysis/04i-session-storage-resume.md)，采用校验、执行、交付和恢复分层。这里是公开客户端代码的设计参考，账号共享队列仍由 WebCC 的 PostgreSQL/Redis 实现。
+
+真实复测发现模型把业务字段放在 `input` 外，三次泛化纠正仍失败。补充通用的校验阶段、字段路径和规则反馈，原始参数不搬动或猜测；仅在该回复尚未交付可执行内容时纠正。日志只记请求 ID 与阶段，不记反馈中的业务内容。错误样本固定为回归测试。

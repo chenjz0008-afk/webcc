@@ -13,7 +13,7 @@ def visible_tools(tools, history):
             for item in block.get('content', []) if isinstance(block.get('content'), list) else []:
                 if isinstance(item, dict) and item.get('type') == 'tool_reference':
                     names.add(item.get('tool_name'))
-    return [tool for tool in tools if tool['name'] in names]
+    return [tool for tool in tools if tool['name'] in names and 'direct' in tool.get('allowed_callers', ['direct'])]
 
 
 def search(payload):

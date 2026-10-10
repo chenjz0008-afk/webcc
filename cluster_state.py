@@ -129,3 +129,7 @@ class ClusterState:
     def busy(self, account_id):
         with self.pool.connection() as db:
             return db.execute('SELECT 1 FROM webcc_occupancy WHERE account_id=%s', (account_id,)).fetchone() is not None
+
+    def busy_accounts(self, identities):
+        with self.pool.connection() as db:
+            return {row[0] for row in db.execute('SELECT account_id FROM webcc_occupancy WHERE account_id=ANY(%s)', (list(identities),))}
