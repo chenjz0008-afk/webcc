@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 import httpx
 from node_agent import NodeAgent
@@ -78,6 +79,16 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/internal/forward', headers={**self.headers, 'X-WebCC-Route': 'http://example.com'})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(self.seen)
+
+    async def test_profile_is_resolved_only_after_auth_and_lease_claim(self):
+        with patch('worker_profiles.endpoint',return_value=54321) as endpoint:
+            rejected=await self.client.post('/internal/forward',headers={**self.headers,'X-WebCC-Worker-Profile':'unknown'})
+            self.assertEqual(rejected.status_code,400);self.assertFalse(self.cluster.claimed)
+            response=await self.client.post('/internal/forward',headers={**self.headers,'X-WebCC-Worker-Profile':'client-tools'},content=b'{}')
+            self.assertEqual(response.status_code,200)
+            self.assertTrue(self.cluster.claimed);endpoint.assert_called_once()
+            self.assertEqual(self.seen[0].url.port,54321)
+            self.assertNotIn('x-webcc-worker-profile',self.seen[0].headers)
 
     async def test_disconnect_drains_before_release(self):
         from starlette.requests import Request

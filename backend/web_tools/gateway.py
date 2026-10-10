@@ -96,14 +96,21 @@ def _forward(handler, admit, raw=None, standard=False):
         alive()
         try:
             account = handler.manager.acquire(exclude=attempted, request_deadline=handler.request_deadline,
-                                               on_wait=waiting, allowed=handler.allowed_accounts)
+                                               on_wait=waiting, allowed=handler.allowed_accounts,
+                                               profile='client-tools' if handler.manager.worker_profiles_enabled else None)
         except Problem as problem:
             if not attempted:
                 last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error',
                         'Account queue wait limit reached; retry later' if problem.status == 429 else 'No eligible account is available')
             break
         attempted.add(account['id'])
-        connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())))
+        try:
+            connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())),
+                profile='client-tools' if handler.manager.worker_profiles_enabled else None)
+        except Problem:
+            handler.manager.release(account)
+            last = (503, 'api_error', 'Client tool worker profile is unavailable')
+            continue
         done, cancelled = threading.Event(), threading.Event()
         result, transport = {}, {}
         pending = queue.Queue(maxsize=128)

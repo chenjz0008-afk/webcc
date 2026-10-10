@@ -16,11 +16,27 @@ def source_token(manager,owner,source):
 
 
 class NativeEvents:
-    def __init__(self,manager,owner):
+    def __init__(self,manager,owner,thinking=True):
         self.manager,self.owner=manager,owner
         self.buffer,self.model=b'','unknown'
         self.blocks,self.sources,self.words={},{},{}
         self.result=None; self.inputs={}; self.finished=False
+        self.thinking, self.hidden, self.indices = thinking, set(), {}
+
+    def visible(self, value):
+        kind, index = value.get('type'), value.get('index')
+        if kind == 'content_block_start':
+            if not self.thinking and value['content_block']['type'] in {'thinking', 'redacted_thinking'}:
+                self.hidden.add(index)
+            elif index not in self.hidden:
+                self.indices[index] = len(self.indices)
+        if index in self.hidden:
+            return None
+        if index is not None:
+            if index not in self.indices:
+                raise ValueError('Content delta has no visible block start')
+            value['index'] = self.indices[index]
+        return value
 
     def frame(self,value):
         value=copy.deepcopy(value);kind=value.get('type');index=value.get('index')
@@ -90,7 +106,15 @@ class NativeEvents:
                 output.append(raw+b'\n\n');continue
             try:value=json.loads(payload)
             except ValueError:output.append(raw+b'\n\n');continue
-            output.extend(self.frame(value))
+            packets = self.frame(value)
+            if self.thinking:
+                output.extend(packets)
+                continue
+            for packet in packets:
+                payload = next((line[6:] for line in packet.splitlines() if line.startswith(b'data: ')), None)
+                visible = self.visible(json.loads(payload)) if payload else None
+                if visible is not None:
+                    output.append(event(visible.pop('type'), **visible))
         for packet in output:
             payload=next((line[6:] for line in packet.splitlines() if line.startswith(b'data: ')),None)
             if payload:self.collect(json.loads(payload))
