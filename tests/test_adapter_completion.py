@@ -210,8 +210,20 @@ class ArtifactAndSelectionTests(unittest.TestCase):
         body=validate(original,m,'owner');self.assertEqual(body['outputs'],['total.txt']);self.assertEqual(body['files'][0]['path'],'source.txt')
         self.assertEqual(original['files'][0]['path'],'input/source.txt')
         item={'owner':'owner','messages':[{'role':'user','content':'Calculate'}],'tools':[],'skill_snapshots':[]}
-        def inference(*args):return {'model':'actual-model','content':[{'type':'tool_use','name':'execute_python','input':{'code':'print(120)','outputs':['output/total.txt']}}]}
+        def inference(*args):
+            request = args[2]
+            self.assertEqual(request['tools'], [])
+            self.assertEqual(request['tool_choice'], {'type': 'none'})
+            self.assertEqual(request['output_config']['format']['type'], 'json_schema')
+            return {'model':'actual-model','content':[{'type':'text','text':json.dumps({'code':'print(120)','outputs':['output/total.txt']})}]}
         self.assertEqual(plan(m,item,inference),('print(120)',['total.txt']))
+
+    def test_execution_plan_rejects_missing_code_without_executing(self):
+        from run_tasks import plan
+        item = {'owner': 'owner', 'messages': [{'role': 'user', 'content': 'Calculate'}], 'tools': [], 'skill_snapshots': []}
+        for value in ({'outputs': []}, {'code': 120, 'outputs': []}, {'code': 'print(120)', 'outputs': [], 'run_now': True}):
+            with self.subTest(value=value), self.assertRaises(Exception):
+                plan(types.SimpleNamespace(), copy.deepcopy(item), lambda *args: {'content': [{'type': 'text', 'text': json.dumps(value)}]})
 
     def test_disabled_code_execution_uses_no_sandbox_or_runtime_permission(self):
         from messages_api import dispatch

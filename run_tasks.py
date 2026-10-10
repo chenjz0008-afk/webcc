@@ -90,29 +90,30 @@ def plan(manager, item, inference):
         'The sandbox cannot install packages or access the internet. Do not assume other dependencies. '
         'Selected Skills are under skills/<name>/; read resources when needed. '
         'Print the final answer or execution summary. Write only requested artifacts under output/. The outputs list uses paths relative to output/, without the output/ prefix. '
-        'Return execute_python with code and outputs. The executor will really run it. Client tool definitions: ' + json.dumps(descriptions))
+        'Only generate program source as JSON with code and outputs. Do not run or test code here; the external E2B executor will run it after validation. Client tool definitions: ' + json.dumps(descriptions))
     for skill in item['skill_snapshots']:
         instruction += '\nSkill ' + skill['name'] + ': ' + skill['instructions']
     instruction += '\nInput paths: ' + json.dumps(item.get('files', []))
-    tool = {'name': 'execute_python', 'description': 'Execute the program in the sandbox', 'input_schema': {
+    schema = {
         'type': 'object', 'properties': {'code': {'type': 'string'}, 'outputs': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 8}},
-        'required': ['code', 'outputs'], 'additionalProperties': False}}
+        'required': ['code', 'outputs'], 'additionalProperties': False}
     request = {'model': 'webcc-prompt-v1', 'max_tokens': min(8192, item.get('max_tokens', 4096)),
-               'messages': item['messages'], 'system': instruction, 'tools': [tool],
-               'tool_choice': {'type': 'tool', 'name': 'execute_python', 'disable_parallel_tool_use': True}}
+               'messages': item['messages'], 'system': instruction, 'tools': [], 'tool_choice': {'type': 'none'}}
     controls = copy.deepcopy(item.get('planner_controls', {}))
     if controls:
         system = controls.pop('system', '')
         request.update(controls)
         request['system'] = [*system, {'type': 'text', 'text': instruction}] if isinstance(system, list) else system + '\n' + instruction
+    request['output_config'] = {**request.get('output_config', {}), 'format': {'type': 'json_schema', 'schema': schema}}
     message = inference(manager, item['owner'], request, None if controls else 'prompt-v1')
     item['planner_usage'] = copy.deepcopy(message.get('usage'))
     item['actual_model'] = message.get('model', 'unknown')
     item['planner_thinking'] = [b for b in message['content'] if b['type'] in {'thinking', 'redacted_thinking'}]
-    calls = [b for b in message['content'] if b['type'] == 'tool_use']
-    if len(calls) != 1 or calls[0]['name'] != 'execute_python':
-        raise FileProblem(502, 'Model did not produce a valid execution plan')
-    code, outputs = calls[0]['input']['code'], calls[0]['input']['outputs']
+    from web_tools.history import load_json
+    from jsonschema import Draft202012Validator
+    value = load_json(''.join(b['text'] for b in message['content'] if b['type'] == 'text'))
+    Draft202012Validator(schema).validate(value)
+    code, outputs = value['code'], value['outputs']
     if not code.strip() or len(code.encode()) > 65536 or len(set(outputs)) != len(outputs):
         raise FileProblem(502, 'Model execution plan exceeds limits')
     outputs = [path.removeprefix('output/') for path in outputs]
