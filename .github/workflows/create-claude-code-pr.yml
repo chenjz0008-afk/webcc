@@ -15,7 +15,8 @@ jobs:
     steps:
       - name: Open pull request
         run: |
-          existing=$(gh pr list --base main --head feat/claude-code-compatibility --state open --json url --jq '.[0].url')
+          set -euo pipefail
+          existing=$(gh pr list --base main --head feat/claude-code-compatibility --state open --json url --jq '.[0].url // empty')
           if [ -n "$existing" ]; then
             echo "$existing" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -44,4 +45,9 @@ jobs:
           - Website latency, quotas and third-party search availability remain upstream constraints.
           - Model selection changes are deferred as requested.
           EOF
-          gh pr create --base main --head feat/claude-code-compatibility --title 'Fix Claude Code tool history and approval compatibility' --body-file /tmp/pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
+          if ! result=$(gh pr create --base main --head feat/claude-code-compatibility --title 'Fix Claude Code tool history and approval compatibility' --body-file /tmp/pr-body.md 2>/tmp/pr-error); then
+            sed 's/^/::error::/' /tmp/pr-error
+            exit 1
+          fi
+          echo "$result" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Created $result"
