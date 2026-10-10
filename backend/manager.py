@@ -370,7 +370,7 @@ class Manager:
             listener.bind(("127.0.0.1", 0))
             return listener.getsockname()[1]
 
-    def run_worker(self, account, image=None, directory=None, port=None, name=None, memory='256m'):
+    def run_worker(self, account, image=None, directory=None, port=None, name=None):
         network = self.worker_network(account, directory)
         self.docker("run", "-d", "--name", name or account["container"], "--restart", "unless-stopped",
                     *network,
@@ -379,7 +379,7 @@ class Manager:
                     "--mount", "type=bind,src={},dst=/etc/clewdr".format(directory or account["directory"]),
                     "--log-driver", "none", "--read-only", "--tmpfs", "/tmp:rw,nosuid,noexec,size=16m",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "0:0",
-                    "--memory", memory, "--pids-limit", "64", "--cpus", "1", image or account["image"])
+                    "--memory", "256m", "--pids-limit", "64", "--cpus", "1", image or account["image"])
 
     def worker_network(self, account, directory=None):
         if os.environ.get("MANAGER_PROXY_ONLY", "false").lower() != "true":

@@ -91,7 +91,7 @@ def endpoint(manager, account, profile):
                 manager.docker('rm', name)
             private_write(directory / 'clewdr.toml', config)
             port = manager.free_port()
-            manager.run_worker(account, directory=str(directory), port=port, name=name, memory='128m')
+            manager.run_worker(account, directory=str(directory), port=port, name=name)
             manager.wait_ready(port)
             current = {'digest': digest, 'port': port}
         elif not status['running']:
