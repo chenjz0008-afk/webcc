@@ -72,6 +72,19 @@ class EnvelopeTests(unittest.TestCase):
                     raw.replace('"version":0', '"version":0,"version":0')):
             with self.assertRaises(ValueError): parse_response(bad, TOOLS)
 
+    def test_missing_and_padded_property_feedback_has_complete_paths(self):
+        from web_tools.api import complete, OutputProblem
+        value = {'calls': [{'name': 'save', 'input': {'id': 'A', ' version': 0}}], 'text': ''}
+        raw = json.dumps({'content': [{'type': 'text', 'text': json.dumps(value)}],
+                          'usage': {'input_tokens': 1, 'output_tokens': 1}, 'stop_reason': 'end_turn'})
+        with self.assertRaises(OutputProblem) as raised:
+            complete(raw, {'tools': TOOLS, 'messages': []})
+        issues = raised.exception.feedback['issues']
+        self.assertEqual({issue['rule'] for issue in issues}, {'required', 'additionalProperties'})
+        self.assertTrue(all(issue['path'] == ['calls', 0, 'input'] for issue in issues))
+        self.assertIn(' version', issues[1]['detail'])
+        self.assertEqual(value['calls'][0]['input'], {'id': 'A', ' version': 0})
+
     def test_call_explanation_is_preserved_and_strict_arguments_wait_for_validation(self):
         request = {'tools': TOOLS, 'messages': []}; output = []
         stream = ToolStream(types.SimpleNamespace(), 'owner', request, output.append)

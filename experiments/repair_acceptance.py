@@ -2,6 +2,7 @@
 import concurrent.futures
 import json
 import os
+import signal
 from pathlib import Path
 import sys
 import threading
@@ -170,6 +171,8 @@ def main():
     cluster = ClusterState(CONFIG['database_url']); keys = []
     report = {'base_url': BASE, 'actual_workbuddy_tested': False, 'rounds': [], 'cases': [], 'supplements': {}}
     samples, stopped = [], threading.Event()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, lambda *_: stopped.set())
     def monitor():
         while not stopped.wait(.25):
             try:
@@ -189,6 +192,8 @@ def main():
         orders = [(1, 2, 4, 8), (4, 1, 8, 2), (2, 8, 1, 4)]
         for repeat, order in enumerate(orders):
             for concurrency in order:
+                if stopped.is_set():
+                    raise RuntimeError('Acceptance stopped; completed rounds retained')
                 trade.ROOT = ROOT / f'round-{repeat}-{concurrency}'; trade.ROOT.mkdir()
                 begin = time.monotonic()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:

@@ -148,6 +148,9 @@ def complete(raw, request, cache=None, owner=None):
         feedback = {'stage': stage}
         if isinstance(error, ValidationError):
             feedback.update(path=list(error.absolute_path), rule=error.validator, detail=error.message[:512])
+            feedback['issues'] = [{'path': list(issue.absolute_path), 'rule': issue.validator,
+                                   'detail': issue.message[:512]}
+                                  for issue in getattr(error, 'webcc_errors', [error])]
         elif isinstance(error, ValueError):
             feedback['detail'] = str(error)[:256]
         raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation',
