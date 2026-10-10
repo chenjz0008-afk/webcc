@@ -1,6 +1,6 @@
 # Claude API 能力完善待办
 
-更新时间：2026-10-09。当前开发分支：`feat/high-priority-api`。
+更新时间：2026-10-10。当前开发分支：`feat/foreign-trade-reliability`。
 
 这里仅保留未完成事项。完整背景见 [方案](docs/CLAUDE-API-PLAN.md)，已完成内容见 [变更记录](CHANGELOG.md)，回滚方式见 [开发说明](docs/DEVELOPMENT.md)。
 

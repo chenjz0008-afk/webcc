@@ -1,0 +1,30 @@
+name: Create reliability PR
+on:
+  push:
+    branches: [feat/foreign-trade-reliability]
+    paths: [.github/workflows/create-reliability-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > /tmp/body.md <<'BODY'
+          ## Changes
+          - Share Messages planning, tool history and validation with Chat Completions.
+          - Preserve ordered text/tool output and correct schema errors before publication.
+          - Add shared queue coordination, office CSV execution and proxied source verification.
+          - Keep ClewdR independent and unchanged.
+
+          ## Verification
+          - 237 server regression tests passed without skips.
+          - Real account document edits, slow tools, stream cancellation and large context passed.
+          - Detailed business and concurrent acceptance is in progress; results will be committed here before release.
+          - No production deployment yet. See docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md.
+          BODY
+          gh pr view feat/foreign-trade-reliability --json url --jq .url || gh pr create --draft --base main --head feat/foreign-trade-reliability --title 'Improve office tool reliability and concurrent API workflows' --body-file /tmp/body.md

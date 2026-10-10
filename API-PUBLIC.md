@@ -1,6 +1,6 @@
 # WebCC API 接入说明
 
-文档版本：2026-10-09
+文档版本：2026-10-10
 
 ## 1. 连接配置
 
@@ -174,7 +174,7 @@ print(content)
 | 503 | 暂无可用资源 | 稍后重试或联系管理员 |
 | 504 | 请求处理超时 | 缩短问题或输出长度，限制重试次数 |
 
-全局并发上限为 4，单账号并发上限为 1；等待队列上限为 16，最长等待 15 秒。实际并发取决于可用资源数量。
+请求按共享等待顺序分配空闲账号。全局并发上限为 4，单账号并发上限为 1；等待队列上限为 16，最长等待 15 秒。实际并发取决于可用资源数量。
 
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供请求标识；Messages 同时返回 `Request-Id` 和 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
@@ -182,7 +182,7 @@ print(content)
 
 ## 9. 工具调用
 
-工具调用使用 `POST /v1/messages`，暂不支持 Chat Completions 的 `tools` / `tool_calls`。
+工具调用支持 `POST /v1/messages` 和 `POST /v1/chat/completions`，无需额外适配请求头。两个入口复用同一套参数校验和历史处理；工具由调用方执行。
 
 ### 9.1 请求配置
 
@@ -201,7 +201,7 @@ print(content)
 
 可使用平台全局密钥。独立密钥需具备 `messages` 权限。
 
-标准客户端工具请求自动采用 WebCC 工具适配。返回参数经过本地 JSON Schema 校验；`strict=true` 表示参数校验，不提供官方约束采样。响应头 `X-WebCC-Adapter: standard-tools-v1` 标明该策略。原有 `webcc-prompt-v1` 与专用请求头仍可使用，独立密钥需额外具备 `experimental_tools` 权限。
+标准客户端工具请求自动采用 WebCC 工具适配。返回参数经过本地 JSON Schema 校验；`strict=true` 表示本地参数校验，完整调用验证后发布；设置 `eager_input_streaming:true` 可选择参数增量。不提供官方约束采样。响应头 `X-WebCC-Adapter: standard-tools-v1` 标明该策略。原有 `webcc-prompt-v1` 与专用请求头仍可使用，独立密钥需额外具备 `experimental_tools` 权限。
 
 Thinking、effort、Beta 等请求控制保留。上游签名原样返回；无签名时返回以 `webccsig_v1_` 开头的平台状态令牌，供本网关校验后续历史，不能用于 Anthropic 官方接口。`cache_control` 可随请求传递；平台缓存复用工具定义和文档解析，不代表模型端缓存。响应 `model` 记录上游返回值，无法取得时为 `unknown`。
 
@@ -319,7 +319,7 @@ print(text)
 
 ### 9.5 限制
 
-历史最多 128 条消息，文本提示数据最多 128 KiB，嵌套最多 32 层。附件独立传递，完整请求最多 32 MiB、最多 16 个附件；附件工具请求同时最多 2 个，繁忙时返回 429。工具结果须紧接工具调用，ID 不得缺失、重复或串用；业务修改的幂等控制由调用方负责。
+历史最多 128 条消息，文本提示数据最多 512 KiB，嵌套最多 32 层。附件独立传递，完整请求最多 32 MiB、最多 16 个附件；附件工具请求同时最多 2 个，繁忙时返回 429。工具结果须紧接工具调用，ID 不得缺失、重复或串用；业务修改的幂等控制由调用方负责。
 
 标准工具流在上游生成时输出真实 Thinking、文本和 `input_json_delta`。工具参数通过 Schema 校验后才发送 `content_block_stop`；完整消息以 `message_stop` 结束。调用方应等待完整工具块和消息完成后执行工具。流中失败发送 `error`，已输出调用不自动重放。旧 `prompt-v1` 和引用答复保留校验后输出模式。
 
@@ -361,6 +361,55 @@ curl --fail-with-body -sS --max-time 180 \
 
 引用必须对应本次请求 tools 中声明的工具。检索结果只来自调用方提交的目录。
 
+### 9.8 Chat Completions 工具往返
+
+声明使用 `tools[].function.parameters`，选择使用 `auto`、`none`、`required` 或指定 function。`parallel_tool_calls:false` 限制并行。返回 `tool_calls` 后，以相同 `tool_call_id` 回传 `role:tool` 消息；后续请求可以不再声明已完成的工具。结构化答案使用 `response_format` 的 `json_schema`。
+
+OpenAI Python SDK 示例：
+
+```python
+import json
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["CLEWDR_API_KEY"],
+    base_url="https://165.154.205.213/v1",
+    timeout=180,
+    max_retries=0,
+)
+tools = [{"type": "function", "function": {
+    "name": "read_product",
+    "description": "Read the product by exact SKU.",
+    "strict": True,
+    "parameters": {
+        "type": "object", "properties": {"sku": {"enum": ["B500"]}},
+        "required": ["sku"], "additionalProperties": False,
+    },
+}}]
+messages = [{"role": "user", "content": "读取 B500，告诉我单价和 MOQ。"}]
+first = client.chat.completions.create(
+    model="claude-sonnet-4-6", messages=messages, tools=tools,
+    tool_choice="required", max_tokens=512,
+)
+message = first.choices[0].message
+messages.append(message.model_dump(exclude_none=True))
+for call in message.tool_calls or []:
+    arguments = json.loads(call.function.arguments)
+    if call.function.name != "read_product" or arguments != {"sku": "B500"}:
+        raise ValueError("Unexpected tool request")
+    # Replace this example lookup with your application's real product service.
+    product = {"sku": "B500", "price": 3.20, "moq": 1000}
+    messages.append({"role": "tool", "tool_call_id": call.id,
+                     "content": json.dumps(product)})
+answer = client.chat.completions.create(
+    model="claude-sonnet-4-6", messages=messages, tools=tools, max_tokens=512,
+)
+print(answer.choices[0].message.content)
+```
+
+流式请求设置 `stream:true`，按工具 `index` 累积参数。完整响应结束并确认参数有效后再执行工具。断流或流内错误后，先核对已执行动作，避免重复写入。
+
 ## 10. 联网搜索
 
 普通 `POST /v1/messages` 已开启网页搜索和网页读取。需要实时信息时，在消息中明确要求搜索，并要求返回来源链接。
@@ -396,7 +445,7 @@ curl --fail-with-body -sS -N --max-time 180 \
 | 下载 | GET /v1/files/{id}/content |
 | 删除 | DELETE /v1/files/{id} |
 
-上传支持 UTF-8 文本、PDF、PNG、JPEG、GIF、WebP。默认单文件最多 20 MiB；上传可带 expires_in_seconds，范围 3600—7776000。资源删除或到期后，引用返回 404。
+上传支持 UTF-8 文本、CSV、PDF、PNG、JPEG、GIF、WebP。UTF-8 CSV 可用 `text/csv` 上传，服务规范化为 `text/plain` 并保留文件名。默认单文件最多 20 MiB；上传可带 expires_in_seconds，范围 3600—7776000。资源删除或到期后，引用返回 404。
 
 在 Messages 的 user 内容或工具结果中引用文件：
 
@@ -430,7 +479,7 @@ curl --fail-with-body -sS --max-time 180 \
 
 ## 13. 代码执行与生成文件
 
-独立密钥需要 runs 权限；输入或生成文件需要 files 权限。代码仅在 E2B 执行，默认禁止联网，任务期限为 30—600 秒，默认 300 秒。
+独立密钥需要 runs 权限；输入或生成文件需要 files 权限。办公模板预装 pandas、numpy、openpyxl、pypdf，执行前检查依赖，不开放运行期联网安装。代码仅在 E2B 执行，默认禁止联网，任务期限为 30—600 秒，默认 300 秒。
 
 ```bash
 curl --fail-with-body -sS --max-time 180 \
@@ -441,6 +490,8 @@ curl --fail-with-body -sS --max-time 180 \
 ```
 
 创建返回 202 与运行 ID。GET /v1/runs/{id} 查询 state；ended 时 result.stdout 为程序输出，files 是生成文件列表，使用第 11 节接口下载。上述程序输出和文件内容均为 120。
+
+标准 Messages 可声明 `code_execution_20260521` 工具，并在 user 内容加入 `{"type":"container_upload","file_id":"file_webcc_..."}`。文件放在沙箱 `input/` 目录；生成文件保存到 `output/`，返回资源 ID 后按第 11 节下载。此流程需要 messages、runs 和 files 权限。
 
 POST /v1/runs/{id}/cancel 取消并清理执行环境。DELETE /v1/runs/{id} 仅删除已终止且清理完成的任务记录；生成文件独立删除。无法确定执行结果时返回 unknown，不自动重新运行代码。
 

@@ -17,7 +17,7 @@ flowchart TD
     Browser[管理页面 / API 调用者] --> Nginx[Nginx HTTPS :443]
     Nginx --> Manager[WebCC · 127.0.0.1:9000]
     Manager --> Store[PostgreSQL · 状态、密钥与文件]
-    Manager --> Limits[Redis · 共享请求限流]
+    Manager --> Limits[Redis · 共享限流与有界等待队列]
     Manager --> WorkerA[官方 ClewdR · 账号 A]
     Manager --> WorkerB[官方 ClewdR · 账号 B]
     WorkerA --> ProxyA[账号 A 的代理]

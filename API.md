@@ -1,6 +1,6 @@
-# ClewdR API 接入说明
+# WebCC API 接入说明
 
-文档版本：2026-10-07
+文档版本：2026-10-10
 
 ## 1. 连接配置
 
@@ -167,6 +167,7 @@ print(content)
 | HTTP 状态 | 含义 | 处理方式 |
 |---|---|---|
 | 400 | 请求格式或参数错误 | 检查 JSON、模型与字段 |
+| 413 | 文件、展开请求或工具上下文超过限制 | 使用文件引用或分段读取 |
 | 401 | API 认证或上游认证失败 | 检查密钥；上游失败联系管理员 |
 | 403 | 上游拒绝访问 | 联系管理员检查资源状态 |
 | 429 | 等待队列已满、等待超时或上游限流 | 降低并发，采用有上限的退避重试 |
@@ -174,14 +175,78 @@ print(content)
 | 503 | 暂无可用资源 | 稍后重试或联系管理员 |
 | 504 | 请求处理超时 | 缩短问题或输出长度，限制重试次数 |
 
-全局并发上限为 4，单账号并发上限为 1；等待队列上限为 16，最长等待 15 秒。实际并发取决于可用资源数量。
+请求按共享等待顺序分配空闲账号。全局并发上限为 4，单账号并发上限为 1；等待队列上限为 16，最长等待 15 秒。实际并发取决于可用资源数量。
 
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
 当前提供 Chat Completions 与 Claude Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
 
-## 网页工具与 PDF 输入
+## 9. 客户端工具调用
 
-POST /v1/messages 支持本平台的显式网页工具策略，要求 X-WebCC-Tools: prompt-v1 和 model=webcc-prompt-v1。该策略支持工具选择和本地参数校验，工具由客户端执行；不提供官方 strict 约束采样或 Thinking 签名。详细请求格式见 [工具接口](docs/EXPERIMENTAL-TOOLS-API.md)。
+Chat Completions 和 Messages 均支持声明客户端工具，无需额外适配请求头。工具在调用方执行，执行结果须按返回的调用 ID 回传。
 
-普通 Messages 支持内联 base64 application/pdf document 输入。单文件最多 20 MiB，请求总大小最多 32 MiB；URL、file_id、原生引用和缓存扩展尚不支持。PDF 与实验工具在同一请求中混用尚未支持。完整边界见 [网页能力范围](docs/WEB-ACCOUNT-CAPABILITIES.md)。
+| 功能 | Chat Completions | Messages |
+|---|---|---|
+| 声明参数 | `tools[].function.parameters` | `tools[].input_schema` |
+| 工具选择 | `auto`、`none`、`required`、指定 function | `auto`、`none`、`any`、指定 tool |
+| 并行控制 | `parallel_tool_calls` | `disable_parallel_tool_use` |
+| 返回调用 | `message.tool_calls` | `content[].tool_use` |
+| 回传结果 | `role:tool`、`tool_call_id` | `tool_result`、`tool_use_id` |
+| 流式参数 | `delta.tool_calls[].function.arguments` | `input_json_delta.partial_json` |
+
+`strict:true` 使用本地 JSON Schema 校验，完整调用验证后发布参数。结构化答案支持 Chat Completions 的 `response_format` 和 Messages 的 `output_config.format`。校验失败时不会返回完整有效工具调用；不保证官方约束采样效果。
+
+工具往返示例（OpenAI Python SDK）：
+
+```python
+import json
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["CLEWDR_API_KEY"],
+    base_url="https://165.154.205.213/v1",
+    timeout=180,
+    max_retries=0,
+)
+tools = [{"type": "function", "function": {
+    "name": "read_product",
+    "description": "Read the product by exact SKU.",
+    "strict": True,
+    "parameters": {
+        "type": "object", "properties": {"sku": {"enum": ["B500"]}},
+        "required": ["sku"], "additionalProperties": False,
+    },
+}}]
+messages = [{"role": "user", "content": "读取 B500，告诉我单价和 MOQ。"}]
+first = client.chat.completions.create(
+    model="claude-sonnet-4-6", messages=messages, tools=tools,
+    tool_choice="required", max_tokens=512,
+)
+message = first.choices[0].message
+messages.append(message.model_dump(exclude_none=True))
+for call in message.tool_calls or []:
+    arguments = json.loads(call.function.arguments)
+    if call.function.name != "read_product" or arguments != {"sku": "B500"}:
+        raise ValueError("Unexpected tool request")
+    # Replace this example lookup with your application's real product service.
+    product = {"sku": "B500", "price": 3.20, "moq": 1000}
+    messages.append({"role": "tool", "tool_call_id": call.id,
+                     "content": json.dumps(product)})
+answer = client.chat.completions.create(
+    model="claude-sonnet-4-6", messages=messages, tools=tools, max_tokens=512,
+)
+print(answer.choices[0].message.content)
+```
+
+流式请求设置 `stream:true`，按工具 `index` 累积参数。完整响应结束并确认参数有效后再执行工具。断流或流内错误后，先核对已执行动作，避免重复写入。
+
+## 10. 文件与执行环境
+
+Files 提供上传、查询、下载和删除，并按调用密钥隔离。UTF-8 CSV 可使用 `text/csv` 上传，服务会规范化为 `text/plain` 并保留文件名。沙箱计算输入使用 `container_upload`；内容阅读使用 `document.source.file_id`。
+
+办公沙箱预装 pandas、numpy、openpyxl 和 pypdf，执行前检查依赖。沙箱内不开放联网安装；未知依赖会返回明确错误。服务端执行所用密钥需有 `messages`、`files` 和 `runs` 权限。
+
+工具文本上下文默认上限为 512 KiB，展开请求总上限为 32 MiB。大文档建议使用文件引用和范围读取。来源抓取使用指定代理，对读取成功的原文进行引用定位；读取失败的来源不标记为已验证。
+
+完整资源、执行、Thinking 与缓存边界见 [标准能力说明](docs/NATIVE-COMPATIBILITY.md)，详细实验工具接口见 [工具接口](docs/EXPERIMENTAL-TOOLS-API.md)。
