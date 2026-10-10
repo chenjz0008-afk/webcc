@@ -12,7 +12,7 @@ PR #2 已合并；下一阶段从合并后的 main 创建 `feat/web-tool-history
 
 ## 检查
 
-后端使用 `python3 -m unittest discover -s tests -v`，前端使用 `npm ci`、`npm run build` 和 `node test_accounts.mjs`。真实上游测试使用服务器隔离环境，不使用开发者本机的 Claude 登录态或项目资料。
+后端使用 `PYTHONPATH=backend python3 -m unittest discover -s tests -v`，前端使用 `npm ci`、`npm run build` 和 `node test_accounts.mjs`。真实上游测试使用服务器隔离环境，不使用开发者本机的 Claude 登录态或项目资料。
 
 保留一份功能矩阵，分别记录模拟测试、真实测试、模型和上游版本。不能把模拟回复当作真实请求成功。
 
@@ -45,7 +45,7 @@ git push
 
 ```bash
 git switch -c rollback/server-baseline server-baseline-2026-10-06
-python3 -m unittest discover -s tests -v
+PYTHONPATH=backend python3 -m unittest discover -s tests -v
 ```
 
 使用该版本发布应用，并使用 `deploy/server-snapshot.json` 记录的官方镜像摘要。需要镜像存在且兼容当前私有数据。数据库结构或状态格式改变时必须同时评估迁移，不可直接假设旧代码能读取新状态。

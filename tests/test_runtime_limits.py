@@ -12,7 +12,7 @@ class RuntimeLimitTests(unittest.TestCase):
         environment.update(values)
         return subprocess.run([sys.executable, '-c',
             'import json,runtime_limits as r;print(json.dumps([r.FILE_MAX,r.FILES_PER_KEY,r.DEFAULT_TTL,r.MEDIA_INFLIGHT]))'],
-            cwd=Path(__file__).resolve().parents[1], env=environment, capture_output=True, text=True)
+            cwd=Path(__file__).resolve().parents[1] / "backend", env=environment, capture_output=True, text=True)
 
     def test_valid_custom_limits(self):
         result = self.evaluate({'MANAGER_FILE_MAX_BYTES': '1024', 'MANAGER_FILES_PER_KEY': '3',

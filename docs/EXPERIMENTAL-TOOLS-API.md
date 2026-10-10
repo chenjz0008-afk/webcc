@@ -8,7 +8,7 @@
 
 ## 开启条件
 
-服务端需安装 requirements-web-tools.txt 中的可选依赖，并设置 MANAGER_WEB_TOOLS_ENABLED=true。默认 false，不启用时正常启动不加载该依赖；开启时会在启动阶段检查依赖可导入。
+服务端需安装 requirements/web-tools.txt 中的可选依赖，并设置 MANAGER_WEB_TOOLS_ENABLED=true。默认 false，不启用时正常启动不加载该依赖；开启时会在启动阶段检查依赖可导入。
 
 请求同时指定：
 

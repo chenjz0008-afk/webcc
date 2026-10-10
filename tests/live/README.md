@@ -23,6 +23,6 @@ sudo python3 tests/live/account_qualification.py
 | repair_acceptance.py | SDK、文件、来源与 1/2/4/8 并发业务矩阵 |
 | sdk_request.mjs | TypeScript SDK 的消息和流式工具往返 |
 
-这些脚本只在服务器上显式执行，普通单元测试不启动它们。候选路径为 `/var/lib/webcc-cluster/repair-candidate`，数据库及 Redis 必须与生产分离。先将完整源码放入候选 app，再使用服务器私有启动配置；凭据不进入 Git。
+这些脚本只在服务器上显式执行，普通单元测试不启动它们。候选路径为 `/var/lib/webcc-cluster/repair-candidate`，数据库及 Redis 必须与生产分离。先将 backend/ 的内容复制到候选 app 根目录，将 tests/ 放到 app/tests/，再使用服务器私有启动配置；凭据不进入 Git。
 
 真实测试消耗账号额度及 E2B 资源。报告、工作区和原始响应留在服务器受限目录；公开提交只保留汇总结论。结束后检查临时密钥、任务、文件及账号占用已清理。

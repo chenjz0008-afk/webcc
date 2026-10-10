@@ -63,7 +63,7 @@ E2B SDK 必须设置显式代理，不提供直连回退。沙箱默认禁止对
 
 ## 部署
 
-1. 安装 requirements-runtime.txt 中锁定的依赖。
+1. 安装 requirements/runtime.txt 中锁定的依赖。
 2. 使用 runtime_queue.build_app 配合 SyncPsycopgConnector，在目标数据库执行 schema_manager.apply_schema()；升级已有队列 schema 按 Procrastinate 迁移说明处理。
 3. 私有环境配置 MANAGER_RUNTIME_ENABLED=true、E2B_API_KEY、MANAGER_E2B_PROXY；模板默认 base。
 4. 安装 deploy/webcc-runtime.service，重启网关并启动 Worker。
