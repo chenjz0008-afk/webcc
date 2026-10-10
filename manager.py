@@ -755,7 +755,9 @@ class Manager:
         with self.condition:
             self.refresh()
             account.update(last_error=kind, last_error_at=int(time.time()))
-            if status in {401, 403}:
+            if kind == 'cookie_pool_unavailable':
+                account['cooldown_until'] = time.time() + 300
+            elif status in {401, 403}:
                 account.update(status="quarantined", reason="上游认证或访问拒绝，HTTP " + str(status))
             elif status == 429:
                 try:
@@ -787,6 +789,10 @@ class Manager:
                 raise Problem(503, "节点拒绝转发，请检查节点服务")
             data = response.read(1024 * 1024)
             if response.status != 200:
+                from worker_errors import no_session
+                if no_session(response.status, data):
+                    self.record_failure(account, 'cookie_pool_unavailable', 503)
+                    raise Problem(503, '账号通道当前无可用会话，请稍后重试')
                 self.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
                 raise Problem(502, "生成验证失败，HTTP " + str(response.status))
             payload = json.loads(data)
@@ -1125,6 +1131,10 @@ class Handler(BaseHTTPRequestHandler):
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
             if response.status >= 400:
+                from worker_errors import no_session
+                if no_session(response.status, response.read(65537)):
+                    self.manager.record_failure(account, 'cookie_pool_unavailable', 503)
+                    return 503, '账号通道当前无可用会话，请稍后重试'
                 if response.status in {401, 403, 429} or response.status >= 500:
                     self.manager.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
                 if response.status in {401, 403, 429} or response.status >= 500:

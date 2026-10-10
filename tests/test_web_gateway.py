@@ -185,6 +185,30 @@ class WebGatewayTests(unittest.TestCase):
             self.assertEqual(account['status'], 'quarantined' if index == 2 else 'ready')
         self.assert_idle()
 
+    def test_cookie_pool_cools_without_permanent_quarantine_and_switches_account(self):
+        first = self.manager.get_account(self.identity)
+        second = self.manager.add({'name': 'second', 'sessionKey': base.SESSION.replace('A' * 100, 'B' * 100), 'proxy': '127.0.0.1:1080:user:pass'})
+        Worker.replies['Bearer '+first['key']] = (500, b'{"error":{"type":"no_cookie_available","message":"No cookie available","code":500}}')
+        Worker.replies['Bearer '+self.manager.get_account(second)['key']] = (200, raw_output())
+        for _ in range(3):
+            first['cooldown_until'] = 0
+            self.manager.save()
+            self.assertEqual(self.web()[0], 200)
+            self.assertEqual(first['status'], 'ready')
+            self.assertEqual(first.get('consecutive_failures', 0), 0)
+            self.assertGreater(first['cooldown_until'], time.time())
+        self.assert_idle()
+
+    def test_no_cookie_error_is_specific_and_public_response_is_safe(self):
+        first = self.manager.get_account(self.identity)
+        Worker.replies['Bearer '+first['key']] = (500, b'{"error":{"type":"no_cookie_available","message":"worker-secret"}}')
+        status, _, raw = self.web()
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(raw)['error']['code'], 'cookie_pool_unavailable')
+        self.assertNotIn(b'worker-secret', raw)
+        self.assertEqual(first['status'], 'ready')
+        self.assert_idle()
+
     def test_queued_disconnect_releases_waiter(self):
         held = self.manager.acquire()
         self.manager.queue_seconds = 5

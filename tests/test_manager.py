@@ -432,6 +432,21 @@ class ManagerTests(unittest.TestCase):
         self.assertIn("X-Request-Id", headers)
         self.assert_idle()
 
+    def test_empty_cookie_pool_cools_and_switches_without_failure_streak(self):
+        self.second_account()
+        first = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + first['key']] = (500, b'{"error":{"type":"no_cookie_available","message":"worker-secret","code":500}}')
+        status, _, raw = self.request('POST', '/v1/chat/completions', self.payload())
+        self.assertEqual(status, 200)
+        self.assertNotIn(b'worker-secret', raw)
+        self.assertEqual(len(Worker.seen), 2)
+        self.assertEqual(first['status'], 'ready')
+        self.assertEqual(first.get('consecutive_failures', 0), 0)
+        self.assertGreater(first['cooldown_until'], time.time())
+        restored = FakeManager(self.temp.name, 'official:version', 'api-password', 'admin-password')
+        self.assertFalse(restored.available(restored.get_account(self.identity)))
+        self.assert_idle()
+
     def test_empty_response_switches_without_quarantine(self):
         self.second_account()
         first = self.manager.get_account(self.identity)
@@ -491,6 +506,17 @@ class ManagerTests(unittest.TestCase):
             self.manager.probe(self.identity)
         self.assertEqual(self.manager.get_account(self.identity)["status"], "ready")
         self.assertEqual(self.manager.get_account(self.identity)["consecutive_failures"], 1)
+
+    def test_probe_without_cookie_cools_without_permanent_isolation(self):
+        account = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + account['key']] = (500, b'{"error":{"type":"no_cookie_available","code":500}}')
+        with self.assertRaises(Problem) as caught:
+            self.manager.probe(self.identity)
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(account['status'], 'ready')
+        self.assertEqual(account.get('consecutive_failures', 0), 0)
+        self.assertFalse(self.manager.available(account))
+        self.assert_idle()
 
     def test_attempt_limit_does_not_touch_fourth_account(self):
         for letter in "BCD":

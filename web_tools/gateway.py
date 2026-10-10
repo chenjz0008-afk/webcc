@@ -205,6 +205,11 @@ def _forward(handler, admit, raw=None, standard=False):
             status = 504 if result['failure'] == 'TimeoutError' else 502
             last = (status, 'api_error', 'Experimental upstream connection failed')
         elif status >= 400:
+            from worker_errors import no_session
+            if no_session(status, result.get('body', b'')):
+                handler.manager.record_failure(account, 'cookie_pool_unavailable', 503)
+                last = (503, 'overloaded_error', 'Account worker has no available session; retry later', 'cookie_pool_unavailable')
+                continue
             last = (status, 'rate_limit_error' if status == 429 else 'api_error', 'Experimental upstream rejected request')
         else:
             try:
