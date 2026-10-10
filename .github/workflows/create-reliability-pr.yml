@@ -27,4 +27,11 @@ jobs:
           - Detailed business and concurrent acceptance is in progress; results will be committed here before release.
           - No production deployment yet. See docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md.
           BODY
-          gh pr view feat/foreign-trade-reliability --json url --jq .url || gh pr create --draft --base main --head feat/foreign-trade-reliability --title 'Improve office tool reliability and concurrent API workflows' --body-file /tmp/body.md
+          if output=$(gh pr view feat/foreign-trade-reliability --json url --jq .url 2>&1); then
+            printf '%s\n' "$output"
+          elif output=$(gh pr create --draft --base main --head feat/foreign-trade-reliability --title 'Improve office tool reliability and concurrent API workflows' --body-file /tmp/body.md 2>&1); then
+            printf '%s\n' "$output"
+          else
+            printf '::error::%s\n' "$output"
+            exit 1
+          fi
