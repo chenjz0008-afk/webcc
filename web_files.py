@@ -29,7 +29,7 @@ def validate_content(mime, raw):
                   'image/jpeg': b'\xff\xd8\xff', 'image/gif': b'GIF8', 'image/webp': b'RIFF'}
     if not raw or len(raw) > MAX_FILE:
         raise FileProblem(413, 'File exceeds configured size limit or is empty')
-    if mime == 'text/plain':
+    if mime in {'text/plain', 'text/csv'}:
         try:
             raw.decode('utf-8')
         except UnicodeError:
@@ -109,6 +109,8 @@ def parse_upload(content_type, raw):
     if len(filename) > 500 or any(ord(c) < 32 for c in filename):
         raise FileProblem(400, 'Invalid filename')
     mime = parse_options_header(part['headers'].get(b'content-type', b'application/octet-stream'))[0].decode('ascii')
+    if mime == 'text/csv':
+        mime = 'text/plain'
     expiry = None
     if b'expires_in_seconds' in result:
         raw_expiry = bytes(result[b'expires_in_seconds'][1]['data'])

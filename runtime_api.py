@@ -1,6 +1,7 @@
 """Owned runtime resources and the opt-in Messages execution adapter."""
 import hashlib
 import hmac
+import copy
 import json
 import re
 import time
@@ -200,8 +201,17 @@ def messages(handler, fields=None, standard=False):
                    'code_execution_type': server['type']}
         if standard:
             inputs = []
-            for message in fields.get('messages') or []:
-                for block in message.get('content', []) if isinstance(message.get('content'), list) else []:
+            request['messages'] = copy.deepcopy(request['messages'])
+            for message in request['messages'] or []:
+                blocks = message.get('content', []) if isinstance(message.get('content'), list) else []
+                for index, block in enumerate(blocks):
+                    if isinstance(block, dict) and block.get('type') == 'container_upload':
+                        if set(block) != {'type', 'file_id'}:
+                            raise FileProblem(400, 'Container upload requires a file_id')
+                        file = manager.files.get(owner, block['file_id'])
+                        inputs.append({'file_id': file[0], 'path': file[2]})
+                        blocks[index] = {'type': 'text', 'text': 'Uploaded file is available at input/' + file[2]}
+                        continue
                     source = block.get('source', {}) if isinstance(block, dict) else {}
                     if isinstance(source, dict) and source.get('type') == 'file':
                         identity = source.get('file_id')

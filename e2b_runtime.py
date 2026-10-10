@@ -36,6 +36,18 @@ class E2BRuntime:
         return sandbox
 
     def start(self, sandbox, code, tools, seconds, skills, inputs):
+        import ast
+        nodes = ast.parse(code).body
+        modules = sorted({name.name.split('.')[0] for node in nodes if isinstance(node, ast.Import) for name in node.names} |
+                         {node.module.split('.')[0] for node in nodes if isinstance(node, ast.ImportFrom) and node.module and not node.level})
+        if modules:
+            import shlex
+            probe = ('import importlib.util,json; modules=' + repr(modules) +
+                     '; print(json.dumps([m for m in modules if importlib.util.find_spec(m) is None]))')
+            result = sandbox.commands.run('python -c ' + shlex.quote(probe), timeout=10)
+            missing = json.loads(result.stdout) if not result.exit_code else ['dependency probe failed']
+            if missing:
+                raise FileProblem(422, 'Sandbox dependencies unavailable before execution: ' + ', '.join(missing))
         sandbox.commands.run('mkdir -p ' + ROOT + '/requests ' + ROOT + '/responses ' + ROOT + '/output ' + ROOT + '/input ' + ROOT + '/skills', timeout=10)
         sandbox.files.write(ROOT + '/runner.py', Path(__file__).with_name('sandbox_runner.py').read_text())
         sandbox.files.write(ROOT + '/program.py', code)

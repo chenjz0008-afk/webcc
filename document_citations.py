@@ -126,6 +126,14 @@ def messages(handler, fields=None, standard=False):
         if stream:
             stream.start()
         response = infer(handler.manager, handler.caller_key or 'platform', request, None if standard else 'prompt-v1', on_check=watcher.check)
+        if response.get('stop_reason') == 'max_tokens':
+            raise FileProblem(502, 'Citation output reached max_tokens; increase the output budget')
+        if response.get('stop_reason') == 'refusal':
+            if stream:
+                stream.complete(response)
+            else:
+                handler.respond(200, response)
+            return
         value = load_json(''.join(b['text'] for b in response['content'] if b['type'] == 'text'))
         response.update(content=[b for b in response['content'] if b['type'] in {'thinking', 'redacted_thinking'}] + verify(value, sources))
         if not standard:
@@ -134,8 +142,10 @@ def messages(handler, fields=None, standard=False):
             stream.complete(response)
         else:
             handler.respond(200, response)
-    except Exception:
+    except Exception as error:
         if not stream or not stream.started:
+            if isinstance(error, (ValueError, TypeError, KeyError)) and not isinstance(error, FileProblem):
+                raise FileProblem(502, 'Citation output failed validation; no verified citation was returned') from None
             raise
         try:
             stream.error('Citation response failed validation or was interrupted')

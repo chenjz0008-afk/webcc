@@ -86,6 +86,8 @@ def plan(manager, item, inference):
     instruction = ('Write a Python program for the requested task. It will run in an isolated sandbox. '
         'Client tools are async functions named as declared, take one dict, return a string; use top-level await or asyncio.gather. '
         'Do not execute website tools. Do not invent tool results. Files are under input/. '
+        'Use Python standard libraries where suitable. The configured office template also provides pandas, numpy, openpyxl and pypdf. '
+        'The sandbox cannot install packages or access the internet. Do not assume other dependencies. '
         'Selected Skills are under skills/<name>/; read resources when needed. '
         'Print the final answer or execution summary. Write only requested artifacts under output/. The outputs list uses paths relative to output/, without the output/ prefix. '
         'Return execute_python with code and outputs. The executor will really run it. Client tool definitions: ' + json.dumps(descriptions))
