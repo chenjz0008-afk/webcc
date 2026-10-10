@@ -2,18 +2,20 @@
 import json
 import re
 from uuid import uuid4
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError
 from web_tools.history import bounded_json, check_choice, check_history, load_json, MAX_BYTES
 
 ENVELOPE = {
     'type': 'object', 'required': ['calls', 'text'], 'additionalProperties': False,
     'properties': {
         'text': {'type': 'string'},
-        'calls': {'type': 'array', 'maxItems': 8, 'items': {
-            'type': 'object', 'required': ['name', 'input'], 'additionalProperties': False,
-            'properties': {'name': {'type': 'string'}, 'input': {'type': 'object'}, 'text': {'type': 'string'}}}},
+        'calls': {'type': 'array', 'maxItems': 8, 'items': {'type': 'object'}},
     },
 }
+CALL = {'type': 'object', 'required': ['name', 'input'], 'additionalProperties': False,
+        'properties': {'name': {'type': 'string'}, 'input': {'type': 'object'}, 'text': {'type': 'string'}}}
+TEXT = {'type': 'object', 'required': ['type', 'text'], 'additionalProperties': False,
+        'properties': {'type': {'const': 'text'}, 'text': {'type': 'string'}}}
 
 
 def check_schema(schema):
@@ -109,7 +111,7 @@ def normalize_envelope(response):
         for call in calls:
             if isinstance(call, dict):
                 call = dict(call)
-                if call.get('text') == '':
+                if call.get('text') == '' and call.get('type') != 'text':
                     call.pop('text')
                 if call.get('type') == 'tool_use':
                     call.pop('type')
@@ -165,16 +167,29 @@ def parse_response(text, tools, choice=None, allow_empty=False, cache=None, owne
     bounded_json(response)
     Draft202012Validator(ENVELOPE).validate(response)
     calls = response['calls']
-    if choice.get('disable_parallel_tool_use') and len(calls) > 1:
+    operations = [c for c in calls if c.get('type') != 'text']
+    if choice.get('disable_parallel_tool_use') and len(operations) > 1:
         raise ValueError('Parallel calls are disabled')
     selected = (choice or {}).get('type', 'auto')
     if selected not in ('auto', 'none', 'any', 'tool'):
         raise ValueError('Unsupported tool choice')
-    if selected == 'none' and calls or selected in ('any', 'tool') and not calls:
+    if selected == 'none' and operations or selected in ('any', 'tool') and not operations:
         raise ValueError('Tool choice not followed')
     blocks = []
+    count = 0
     for index, call in enumerate(calls):
-        validate_call(call, tools, choice, index)
+        is_text = call.get('type') == 'text'
+        try:
+            Draft202012Validator(TEXT if is_text else CALL).validate(call)
+        except ValidationError as error:
+            error.path.extendleft((index, 'calls'))
+            raise
+        if is_text:
+            if call['text']:
+                blocks.append(dict(call))
+            continue
+        validate_call(call, tools, choice, count)
+        count += 1
         blocks.append({'type': 'tool_use', 'id': 'toolu_' + uuid4().hex,
                        'name': call['name'], 'input': call['input']})
         if call.get('text'):
@@ -185,7 +200,7 @@ def parse_response(text, tools, choice=None, allow_empty=False, cache=None, owne
             blocks.insert(0, block)
         else:
             blocks.append(block)
-    if not calls:
-        if not response['text']:
+    if not operations:
+        if not any(b.get('text') for b in blocks):
             raise ValueError('Empty final answer')
-    return {'content': blocks, 'stop_reason': 'tool_use' if calls else 'end_turn'}
+    return {'content': blocks, 'stop_reason': 'tool_use' if operations else 'end_turn'}

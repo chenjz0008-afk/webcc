@@ -115,8 +115,10 @@ class ToolStream:
             if kind != 'string':
                 raise ValueError('Call explanation must be text')
             self.current['text'] = value
-        elif prefix == 'calls.item.type' and (kind != 'string' or value != 'tool_use'):
-            raise ValueError('Unknown tool metadata type')
+        elif prefix == 'calls.item.type':
+            if kind != 'string' or value not in {'tool_use', 'text'}:
+                raise ValueError('Unknown content metadata type')
+            self.current['type'] = value
         elif prefix == 'calls.item.id':
             import re
             if kind != 'string' or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', value):
@@ -142,6 +144,12 @@ class ToolStream:
             if self.active and self.active['type'] == 'tool_use':
                 self.output('content_block_delta', index=self.index, delta={'type': 'input_json_delta', 'partial_json': part})
         elif prefix == 'calls.item' and kind == 'end_map':
+            if self.current.get('type') == 'text':
+                if self.call_keys != {'type', 'text'}:
+                    raise ValueError('Invalid text content block')
+                self.flush_text()
+                self.append_text(self.current['text'])
+                return
             if 'name' not in self.current:
                 raise ValueError('Missing tool name')
             if 'id' in self.call_keys and 'type' not in self.call_keys:

@@ -188,7 +188,10 @@ class GatewayIncrementalTests(unittest.TestCase):
         body={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'messages':[{'role':'user','content':'Read A'}]}
         status,_,raw=self.request('POST','/v1/messages',body)
         self.assertEqual(status,200);self.assertEqual(json.loads(raw)['content'][0]['input'],{'id':'A'})
-        self.assertEqual(len(Worker.seen),2);self.assertIn(b'No tool has executed',Worker.seen[-1]['body'])
+        self.assertEqual(len(Worker.seen),2)
+        correction=json.loads(Worker.seen[-1]['body'])['messages'][-1]['content']
+        feedback=json.loads(correction.split('failed validation: ',1)[1].split('. Correct it',1)[0])
+        self.assertEqual(feedback['path'],['id']);self.assertEqual(feedback['rule'],'enum')
         self.assertEqual(first['status'],'ready');self.assert_idle()
 
 class SourceGuards(unittest.TestCase):

@@ -99,6 +99,31 @@ class EnvelopeTests(unittest.TestCase):
         with self.assertRaises(Exception):
             stream.finish({'content': [{'type': 'tool_use', 'name': 'save', 'input': {'id': 'other', 'version': 0}}], 'stop_reason': 'tool_use', 'usage': {'output_tokens': 1}})
 
+    def test_standard_text_blocks_keep_order_without_creating_extra_operations(self):
+        call = {'name': 'save', 'input': {'id': '中文quote', 'version': 0}}
+        note = {'type': 'text', 'text': '保存后回读'}
+        for items in ([call, note], [note, call], [note, call, note], [call, {**note, 'text': ''}]):
+            value = {'calls': items, 'text': ''}
+            raw = json.dumps(value, ensure_ascii=False)
+            original = copy.deepcopy(value)
+            message = parse_response(raw, TOOLS, {'type': 'any', 'disable_parallel_tool_use': True})
+            for width in (1, 7, len(raw)):
+                output = []
+                stream = ToolStream(types.SimpleNamespace(), 'owner', {'tools': TOOLS, 'messages': [],
+                    'tool_choice': {'type': 'any', 'disable_parallel_tool_use': True}}, output.append)
+                for offset in range(0, len(raw), width):
+                    stream.upstream({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': raw[offset:offset+width]}})
+                stream.finish({**message, 'usage': {'output_tokens': 1}})
+                starts = [json.loads(line[6:])['content_block']['type'] for line in b''.join(output).splitlines()
+                          if line.startswith(b'data: ') and json.loads(line[6:])['type'] == 'content_block_start']
+                expected = [b['type'] for b in message['content']]
+                self.assertEqual(starts, expected)
+                self.assertEqual(len(stream.calls), 1)
+            self.assertEqual(value, original)
+        for item in ({'type': 'text', 'text': 'note', 'input': {}}, {'type': 'text'}, {'text': 'untyped'}):
+            with self.assertRaises(Exception):
+                parse_response(json.dumps({'calls': [item], 'text': ''}), TOOLS)
+
 
 class ChatTests(unittest.TestCase):
     def test_parallel_results_and_choice_round_trip(self):
