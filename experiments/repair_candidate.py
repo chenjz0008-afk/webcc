@@ -48,6 +48,25 @@ def traced_feed(self, value):
             'error': str(error), 'raw': self.raw.decode(errors='replace'), 'request': self.request}, ensure_ascii=False))
         raise
 ToolStream.feed = traced_feed
+import upstream_message
+original_read = upstream_message.read
+def traced_read(response, *args, **kwargs):
+    class Observed:
+        def __getattr__(self, name):
+            return getattr(response, name)
+        def __iter__(self):
+            for line in response:
+                if line.startswith(b'data: '):
+                    value = json.loads(line[6:])
+                    block = value.get('content_block', {})
+                    if value.get('type') == 'content_block_start' and block.get('type') not in {'text', 'thinking', 'redacted_thinking'}:
+                        record = {'type': block.get('type'), 'name': block.get('name'), 'fields': list(block),
+                                  'input_fields': list(block.get('input', {})) if isinstance(block.get('input'), dict) else None}
+                        with (ROOT / 'native-event-trace.jsonl').open('a') as trace:
+                            trace.write(json.dumps(record) + '\n')
+                yield line
+    return original_read(Observed(), *args, **kwargs)
+upstream_message.read = traced_read
 import document_citations
 original_citations = document_citations.messages
 def traced_citations(*args, **kwargs):

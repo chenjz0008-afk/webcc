@@ -21,6 +21,13 @@ class CitationTests(unittest.TestCase):
         self.assertEqual(citation['start_char_index'], 3)
         self.assertEqual(citation['end_char_index'], 9)
 
+    def test_unique_quote_needs_no_model_generated_character_count(self):
+        value = {'answer': '北区预算37', 'quotes': [{'document_index': 0, 'page': 1, 'quote': '北区预算37'}]}
+        result = verify(value, self.source('标题\n北区预算37。南区预算83。'))
+        self.assertEqual(result[0]['citations'][0]['start_char_index'], 3)
+        with self.assertRaises(FileProblem):
+            verify(value, self.source('北区预算37。北区预算37。'))
+
     def test_ambiguous_quote_and_wrong_document_rejected(self):
         source = self.source('same quote / same quote')
         for quote in ({'document_index': 0, 'page': 1, 'start': 3, 'quote': 'same quote'},
@@ -83,6 +90,13 @@ class UpstreamStreamTests(unittest.TestCase):
     def test_unexpected_server_tool_not_replayed(self):
         with self.assertRaises(UnexpectedTool):
             read(self.fixture(block={'type': 'tool_use', 'name': 'write_file'}))
+
+    def test_json_server_tool_uses_the_same_non_replay_boundary(self):
+        response = io.BytesIO(json.dumps({'content': [{'type': 'tool_use', 'name': 'write_file'}]}).encode())
+        response.length = None
+        response.getheader = lambda *args: 'application/json'
+        with self.assertRaises(UnexpectedTool):
+            read(response, thinking=True)
 
 
 if __name__ == '__main__':
