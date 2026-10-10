@@ -128,6 +128,8 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 进一步核对用户提供仓库的 [`toolExecution.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/toolExecution.ts)：执行前 `inputSchema.safeParse`，失败经 `formatZodValidationError` 形成模型可见错误；结合 [`StreamingToolExecutor.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 的 queued/executing/completed/yielded 状态和 [并行结果恢复分析](https://github.com/liuup/claude-code-analysis/blob/main/analysis/04i-session-storage-resume.md)，采用校验、执行、交付和恢复分层。这里是公开客户端代码的设计参考，账号共享队列仍由 WebCC 的 PostgreSQL/Redis 实现。
 
 真实复测发现模型把业务字段放在 `input` 外，三次泛化纠正仍失败。补充通用的校验阶段、字段路径和规则反馈，原始参数不搬动或猜测；仅在该回复尚未交付可执行内容时纠正。日志只记请求 ID 与阶段，不记反馈中的业务内容。错误样本固定为回归测试。
+
+再次复测发现 `" expected_version"` 带前导空格，单条 required 错误没有完整说明未知字段。采用 [jsonschema iter_errors](https://python-jsonschema.readthedocs.io/en/stable/errors/) 返回有界的完整字段错误，并补齐 calls/index/input 路径，原输入保持不变。该分析仓库同样把校验失败交给模型纠正，不能据此承诺不会生成坏参数。官方 strict 的语法约束采样属于服务端能力；仅复制客户端执行器或更换为 TypeScript 不会获得它。参考 [Anthropic 工具设计](https://www.anthropic.com/engineering/writing-tools-for-agents)，将根因样本纳入真实业务验收，先检查结果再追加改动。
 ## 2026-10-10：引用定位的职责调整
 
 连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 Claude Code 分析仓库的算法。

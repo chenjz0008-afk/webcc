@@ -190,8 +190,9 @@ class GatewayIncrementalTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertEqual(json.loads(raw)['content'][0]['input'],{'id':'A'})
         self.assertEqual(len(Worker.seen),2)
         correction=json.loads(Worker.seen[-1]['body'])['messages'][-1]['content']
-        feedback=json.loads(correction.split('failed validation: ',1)[1].split('. Correct it',1)[0])
-        self.assertEqual(feedback['path'],['id']);self.assertEqual(feedback['rule'],'enum')
+        feedback,_=json.JSONDecoder().raw_decode(correction.split('failed validation: ',1)[1])
+        self.assertEqual(feedback['path'],['calls',0,'input','id']);self.assertEqual(feedback['rule'],'enum')
+        self.assertEqual(feedback['issues'][0]['path'],feedback['path'])
         self.assertEqual(first['status'],'ready');self.assert_idle()
 
 class SourceGuards(unittest.TestCase):
