@@ -1,0 +1,34 @@
+name: Create layout pull request
+on:
+  push:
+    branches: [refactor/project-layout]
+    paths: [.github/workflows/create-layout-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Open pull request
+        run: |
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Changes
+          - Group backend modules, requirements and configuration templates in dedicated directories.
+          - Keep four primary documents at the repository root; preserve maintained tests and synthetic fixtures.
+          - Update installation paths, frontend build output and concise API documentation.
+
+          ## Verification
+          - Clean server checkout regression suite, frontend build and account display checks.
+          - Runtime file contents match the deployed d60e894 release; ClewdR is unchanged.
+          - The complete 96-task business matrix remains pending.
+          EOF
+          existing=$(gh pr list --head refactor/project-layout --base main --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            printf '%s\n' "$existing"
+          else
+            gh pr create --base main --head refactor/project-layout --title 'Organize project directories and refresh release documentation' --body-file /tmp/pr-body.md
+          fi

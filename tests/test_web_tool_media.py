@@ -9,7 +9,7 @@ from web_files import FileProblem, FileStore
 from web_tools.api import prepare
 
 TOOLS = [{'name': 'save', 'input_schema': {'type': 'object'}}]
-FIXTURES = Path(__file__).parents[1] / 'experiments' / 'fixtures'
+FIXTURES = Path(__file__).parent / 'fixtures'
 
 
 def image(raw=None):

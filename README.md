@@ -12,6 +12,18 @@ WebCC 是一个用于管理多个 Claude 网页账号的后台和 API 网关。�
 
 ## 架构
 
+```text
+backend/       后端代码、工具适配和前端构建产物
+frontend/      React / MUI 前端源码
+config/        不含凭据的环境配置模板
+deploy/        安装、迁移和服务配置
+requirements/  按运行组件划分的 Python 依赖
+tests/         回归测试、合成样例和服务器验收入口
+docs/          架构、运维与验收说明
+```
+
+根目录仅保留项目介绍、对外接口、待办和变更记录，以及 Git 配置。临时测试结果、历史方案和带密钥的交付文档保存在仓库外。
+
 ```mermaid
 flowchart TD
     Browser[管理页面 / API 调用者] --> Nginx[Nginx HTTPS :443]
@@ -36,12 +48,12 @@ flowchart TD
 
 | 部分 | 职责 |
 | --- | --- |
-| `manager.py` | 账号和凭据、代理检查、容器启停、平台认证、并发、请求转发和异常处理 |
-| `egress.py` | 账号容器代理出口白名单与启动前防火墙恢复 |
-| `updater.py` | 检查 ClewdR 官方版本、候选容器验证、逐个更新和失败回退 |
+| `backend/manager.py` | 账号和凭据、代理检查、容器启停、平台认证、并发、请求转发和异常处理 |
+| `backend/egress.py` | 账号容器代理出口白名单与启动前防火墙恢复 |
+| `backend/updater.py` | 检查 ClewdR 官方版本、候选容器验证、逐个更新和失败回退 |
 | `frontend/src/pages/` | 工作台、账号、资源、更新和 API 接入页面 |
 | `frontend/src/components/` | 后台布局、账号表单、详情抽屉、凭据字段和复制组件 |
-| `static/` | 线上前端构建快照（2026-10-07 同步）；开发时由 Vite 重新生成 |
+| `backend/static/` | 线上前端构建快照（2026-10-07 同步）；开发时由 Vite 重新生成 |
 | `deploy/` | 安装脚本、systemd 单元、服务器 Nginx 配置和快照清单 |
 | `tests/` | 单元与数据库回归；`support/` 保存合成文档，`live/` 保存需明确启动的服务器验收 |
 | `docs/` | 架构、接口边界、部署维护和当前修复计划 |
@@ -105,11 +117,9 @@ ClewdR 自身的重试与网关的不同账号重试是两个层次。现有账�
 
 ## API 与当前边界
 
-目前提供网页账号的 OpenAI 兼容聊天接口和 Anthropic Messages 入口。调用示例和模型范围见 [API 文档](API-PUBLIC.md)，错误策略见 [错误处理说明](ERROR-HANDLING.md)。
+目前提供网页账号的 OpenAI 兼容聊天接口和 Anthropic Messages 入口。调用示例和模型范围见 [API 文档](API-PUBLIC.md)，错误策略见 [错误处理说明](docs/ERROR-HANDLING.md)。
 
-当前属于部分协议兼容，不能等同完整官方 Claude API。网页通道没有完整传递自定义工具和工具结果；免费账号可能由上游自动选择模型。模型名、结束原因和用量也存在上游转换限制。
-
-`/code` 路由存在，但此次服务器隔离测试没有在 100 秒内取得真实回复，尚未确认可用。完整工具、Files、Batches、官方缓存和服务端工具属于后续兼容工作，不能从普通聊天成功推断支持。
+WebCC 已提供客户端工具往返、文件管理、持久批量任务、Skills、MCP 和 E2B 执行。网页账号可能由上游自动选择模型；官方约束采样、模型端缓存和原生 Thinking 签名仍取决于上游能力。平台状态令牌和处理缓存分别用于历史校验和减少重复处理。
 
 剩余工作与逐项验收要求见 [待办清单](TODO.md)。完成并验收后从清单删除，结果保留在 [变更记录](CHANGELOG.md)。
 
@@ -136,7 +146,7 @@ npm ci
 npm run build
 node test_accounts.mjs
 cd ..
-python3 -m unittest discover -s tests -v
+PYTHONPATH=backend python3 -m unittest discover -s tests -v
 ```
 
 构建和单元测试不需要真实账号。真实生成测试会访问上游和消耗额度，应在隔离环境执行，并分别记录模拟和真实结果。
@@ -147,14 +157,16 @@ python3 -m unittest discover -s tests -v
 sudo bash deploy/install.sh
 ```
 
-首次安装会创建 `/etc/clewdr-manager.env` 模板。填写两个不同的强密码后再次运行。脚本依赖已安装的 Docker，不负责配置 Nginx、证书或导入账号。部署前先生成 `static/`，迁移时调整地址、证书路径和环境参数。
+首次安装会创建 `/etc/clewdr-manager.env` 模板。填写两个不同的强密码后再次运行。脚本依赖已安装的 Docker，不负责配置 Nginx、证书或导入账号。部署前先生成 `backend/static/`，迁移时调整地址、证书路径和环境参数。
 
-当前运行版本在 Git 中保存为 `server-baseline-2026-10-06` 标签，后续兼容开发使用 `feat/claude-api-compatibility` 分支。小提交分别完成修改和测试，通过后再考虑发布；分支推送不会自动部署服务器。
+`server-baseline-2026-10-06` 标签保留最初导出的版本。2026-10-10 已发布 `d60e894`，完成公网工具、文件、引用及四并发复测。分支推送不会自动部署服务器。
 
-源码回滚使用 Git，账号资料和运行状态使用服务器私有备份。代码回滚不能恢复 Cookie，也不能撤销已经执行的上游请求。具体步骤见 [开发与回滚](docs/DEVELOPMENT.md)，日常操作见 [运维说明](OPERATIONS.md)。
+安装脚本将 `backend/` 中的运行文件复制到 `/opt/clewdr-manager/`，沿用既有 systemd 启动路径。源码目录与安装目录分开，整理仓库不需要修改 ClewdR 或迁移账号数据。
+
+源码回滚使用 Git，账号资料和运行状态使用服务器私有备份。代码回滚不能恢复 Cookie，也不能撤销已经执行的上游请求。具体步骤见 [开发与回滚](docs/DEVELOPMENT.md)，日常操作见 [运维说明](docs/OPERATIONS.md)。
 
 ## 工具调用与验收
 
-工具适配由 WebCC 实现，独立于官方 ClewdR。共享逻辑在 `web_tools/`，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。兼容范围和状态签名见 [API 文档](API-PUBLIC.md)。
+工具适配由 WebCC 实现，独立于官方 ClewdR。共享逻辑在 `backend/web_tools/`，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。兼容范围和状态签名见 [API 文档](API-PUBLIC.md)。
 
 [服务器验收](tests/live/README.md)说明真实测试的范围和启动条件；[修复验收](docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)保留当前结论与未完成项。仓库保留可维护的测试，不保存逐次原始响应、临时脚本、重复方案或带密钥的交付文档。历史记录已归档到仓库外，Git 历史也可追溯。

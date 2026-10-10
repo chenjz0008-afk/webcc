@@ -1,6 +1,6 @@
 # Claude API 能力完善待办
 
-更新时间：2026-10-10。当前开发分支：`feat/foreign-trade-reliability`。
+更新时间：2026-10-10。当前开发分支：`refactor/project-layout`。
 
 这里仅保留未完成事项。完整背景见 方案（历史记录已归档），已完成内容见 [变更记录](CHANGELOG.md)，回滚方式见 [开发说明](docs/DEVELOPMENT.md)。
 
@@ -126,7 +126,7 @@
 ## F. 实际应用验收
 
 - [ ] A03 修复外贸办公深度测试暴露的问题并复测。
-  - 默认 Chat Completions 工具往返、CSV/沙箱依赖、引用定位、业务受众及错误恢复已取得候选通过记录；最新 247 项完整回归通过。已修复协议与任务指令冲突、无可用会话 500 被永久隔离的分类问题。保留全部历史失败，真实复验受上游会话冷却影响，完整并发矩阵和生产发布仍未完成，见 [修复验收](docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)。未完成门槛通过前继续保留 A03。
+  - Chat Completions 工具往返、CSV/沙箱依赖、引用定位、程序化工具与 Skills 已通过真实复验；248 项完整回归通过。d60e894 已部署，公网 SDK、文件、来源和四并发岗位通过。完整 96 项交错矩阵仍待复测，见 [修复验收](docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)。未完成门槛通过前继续保留 A03。
 
 - [ ] A01 SDK 与文档应用的端到端验收。
   - 用户指定以 WorkBuddy 类应用为目标，只测试并保留必要代码。官方自定义模型采用 Chat Completions；一次服务器真实探测返回 200，但没有标准 tool_calls，必要工具条件未通过。见 场景报告（历史记录已归档）。WorkBuddy 桌面应用尚未端到端验收，不能用 Claude SDK 实验通过代替。

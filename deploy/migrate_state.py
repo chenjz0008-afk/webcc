@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from cluster_state import ClusterState
 from postgres_files import PostgresFiles
 from psycopg.types.json import Jsonb

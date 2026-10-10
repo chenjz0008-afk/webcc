@@ -320,10 +320,10 @@ class RuntimeUploadTests(unittest.TestCase):
         import subprocess, sys
         from pathlib import Path
         article = '<html><body><article><h1>YouTube Shorts for businesses</h1>' + ('<p>Show actual products and direct viewers to wholesale inquiries. Keep claims grounded in your product catalog.</p>' * 20) + '</article><!--' + ('x' * 1100000) + '--></body></html>'
-        result = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve().parents[1] / 'html_text.py')], input=article.encode(), capture_output=True, timeout=6)
+        result = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve().parents[1] / 'backend' / 'html_text.py')], input=article.encode(), capture_output=True, timeout=6)
         self.assertEqual(result.returncode, 0)
         self.assertIn(b'wholesale', result.stdout)
-        rejected = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve().parents[1] / 'html_text.py')], input=b'x' * 2097153, capture_output=True, timeout=6)
+        rejected = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve().parents[1] / 'backend' / 'html_text.py')], input=b'x' * 2097153, capture_output=True, timeout=6)
         self.assertNotEqual(rejected.returncode, 0)
 
 
