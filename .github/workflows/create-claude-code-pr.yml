@@ -1,0 +1,47 @@
+name: Create Claude Code compatibility pull request
+on:
+  push:
+    branches: [feat/claude-code-compatibility]
+    paths: [.github/workflows/create-claude-code-pr.yml]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Open pull request
+        run: |
+          existing=$(gh pr list --base main --head feat/claude-code-compatibility --state open --json url --jq '.[0].url')
+          if [ -n "$existing" ]; then
+            echo "$existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Changes
+          - Preserve chronological instructions, parallel tool results and validated terminal responses through the shared Messages/OpenAI tool pipeline.
+          - Isolate client tool requests with companion workers using the existing image, proxy network and account lease. ClewdR source and image remain unchanged.
+          - Bound real Claude Code approval classification requests, validate verdicts and hide disabled Thinking without returning empty success responses.
+          - Update API and operations documentation, including profile lifecycle and rollback.
+
+          ## Verification
+          - Server regression: 266 tests passed, no failures or skips.
+          - Real Claude Code on the server: Read, Bash, Edit with readback, document comparison, missing-file recovery, PDF and WebSearch.
+          - Four concurrent SDK tool cycles passed with four distinct account leases.
+          - Production HTTPS: streaming and non-streaming OpenAI tool cycles and reversed parallel tool results passed.
+          - Real approval decisions validated for both permitted and blocked prompts; no fabricated verdicts.
+
+          ## Deployment
+          - Runtime release b693ed38e204a009ff5aca556be5ee0b58a652f4 is deployed; manager, runtime and nginx are active.
+          - Rollback backup: /var/backups/webcc/claude-code-20261010T161934Z.
+          - Actual model tests ran only on the server. Local Claude Code and Mac model traffic were not used.
+
+          ## Scope
+          - WorkBuddy itself, multiple physical servers and sustained load are not yet tested.
+          - Website latency, quotas and third-party search availability remain upstream constraints.
+          - Model selection changes are deferred as requested.
+          EOF
+          gh pr create --base main --head feat/claude-code-compatibility --title 'Fix Claude Code tool history and approval compatibility' --body-file /tmp/pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
