@@ -69,7 +69,7 @@ message = client.messages.create(
 
 ## TypeScript SDK
 
-官方 SDK 0.131.0 已在服务器候选环境通过普通和 SSE 工具往返。初始化时显式设置 apiKey、baseURL、defaultHeaders: {"X-WebCC-Tools": "prompt-v1"} 及 maxRetries: 0；请求 model 为 webcc-prompt-v1。普通请求使用 client.messages.create，SSE 使用 client.messages.stream(params).finalMessage()。传入工具和历史沿用上表；客户端执行工具后回传对应 tool_use_id。测试代码见 experiments/sdk_request.mjs，结果和 HTTPS 范围见 [SDK 验收](TYPESCRIPT-SDK.md)。
+官方 SDK 0.131.0 已在服务器候选环境通过普通和 SSE 工具往返。初始化时显式设置 apiKey、baseURL、defaultHeaders: {"X-WebCC-Tools": "prompt-v1"} 及 maxRetries: 0；请求 model 为 webcc-prompt-v1。普通请求使用 client.messages.create，SSE 使用 client.messages.stream(params).finalMessage()。传入工具和历史沿用上表；客户端执行工具后回传对应 tool_use_id。测试代码见 tests/live/sdk_request.mjs，结果和 HTTPS 范围见 SDK 验收（历史记录已归档）。
 
 ## 错误与重试
 

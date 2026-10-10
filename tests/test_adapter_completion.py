@@ -216,6 +216,8 @@ class ArtifactAndSelectionTests(unittest.TestCase):
             self.assertEqual(request['tools'], [])
             self.assertEqual(request['tool_choice'], {'type': 'none'})
             self.assertEqual(request['output_config']['format']['type'], 'json_schema')
+            self.assertIn('json.loads(await tool_name', request['system'])
+            self.assertIn('Plain-text tool results remain strings', request['system'])
             return {'model':'actual-model','content':[{'type':'text','text':json.dumps({'code':'print(120)','outputs':['output/total.txt']})}]}
         self.assertEqual(plan(m,item,inference),('print(120)',['total.txt']))
 

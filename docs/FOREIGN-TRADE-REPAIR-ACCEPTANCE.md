@@ -1,6 +1,6 @@
 # 外贸办公修复验收
 
-2026-10-10。候选版本，尚未部署。修复范围及依据见[方案](FOREIGN-TRADE-REMEDIATION-PLAN.md)，最新回归、停止矩阵与真实冷却分类的脱敏记录见[验收数据](foreign-trade-repair-checkpoint-2026-10-10.json)。
+2026-10-10。候选版本，尚未部署。修复范围及依据见[方案](FOREIGN-TRADE-REMEDIATION-PLAN.md)，最新回归、停止矩阵与真实冷却分类的脱敏记录见验收数据（历史记录已归档）。
 
 ## 已取得的证据
 

@@ -85,6 +85,8 @@ def plan(manager, item, inference):
     descriptions = [{k: t.get(k) for k in ('name', 'description', 'input_schema')} for t in item['tools']]
     instruction = ('Write a Python program for the requested task. It will run in an isolated sandbox. '
         'Client tools are async functions named as declared, take one dict, return a string; use top-level await or asyncio.gather. '
+        'For JSON tool results, decode the returned string with json.loads before indexing it or passing records to a Skill: '
+        'record = json.loads(await tool_name({"key": "value"})). Plain-text tool results remain strings. '
         'Do not execute website tools. Do not invent tool results. Files exist only under input/ in the external E2B sandbox, not on this website; do not open them here. '
         'Use Python standard libraries where suitable. The configured office template also provides pandas, numpy, openpyxl and pypdf. '
         'The sandbox cannot install packages or access the internet. Do not assume other dependencies. '

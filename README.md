@@ -43,8 +43,8 @@ flowchart TD
 | `frontend/src/components/` | 后台布局、账号表单、详情抽屉、凭据字段和复制组件 |
 | `static/` | 线上前端构建快照（2026-10-07 同步）；开发时由 Vite 重新生成 |
 | `deploy/` | 安装脚本、systemd 单元、服务器 Nginx 配置和快照清单 |
-| `tests/` | 使用模拟账号服务的后端测试，不需要真实 Cookie |
-| `docs/` | 部署时原 README、后续兼容方案和分支维护说明 |
+| `tests/` | 单元与数据库回归；`support/` 保存合成文档，`live/` 保存需明确启动的服务器验收 |
+| `docs/` | 架构、接口边界、部署维护和当前修复计划 |
 
 ## 当前服务器
 
@@ -105,7 +105,7 @@ ClewdR 自身的重试与网关的不同账号重试是两个层次。现有账�
 
 ## API 与当前边界
 
-目前提供网页账号的 OpenAI 兼容聊天接口和 Anthropic Messages 入口。调用示例和模型范围见 [API 文档](API.md)，错误策略见 [错误处理说明](ERROR-HANDLING.md)。
+目前提供网页账号的 OpenAI 兼容聊天接口和 Anthropic Messages 入口。调用示例和模型范围见 [API 文档](API-PUBLIC.md)，错误策略见 [错误处理说明](ERROR-HANDLING.md)。
 
 当前属于部分协议兼容，不能等同完整官方 Claude API。网页通道没有完整传递自定义工具和工具结果；免费账号可能由上游自动选择模型。模型名、结束原因和用量也存在上游转换限制。
 
@@ -113,7 +113,7 @@ ClewdR 自身的重试与网关的不同账号重试是两个层次。现有账�
 
 剩余工作与逐项验收要求见 [待办清单](TODO.md)。完成并验收后从清单删除，结果保留在 [变更记录](CHANGELOG.md)。
 
-后续目标是让 Anthropic SDK 通过平台 Base URL 和平台密钥使用明确支持的功能，按模型及能力选择合适上游。方案见 [Claude API 兼容计划](docs/CLAUDE-API-PLAN.md)。
+后续目标是让 Anthropic SDK 通过平台 Base URL 和平台密钥使用明确支持的功能，按模型及能力选择合适上游。方案见 Claude API 兼容计划（历史记录已归档）。
 
 ## 与外部项目的关系
 
@@ -153,8 +153,8 @@ sudo bash deploy/install.sh
 
 源码回滚使用 Git，账号资料和运行状态使用服务器私有备份。代码回滚不能恢复 Cookie，也不能撤销已经执行的上游请求。具体步骤见 [开发与回滚](docs/DEVELOPMENT.md)，日常操作见 [运维说明](OPERATIONS.md)。
 
-## 网页工具实验策略
+## 工具调用与验收
 
-候选代码提供默认关闭的 prompt-v1 实验策略，独立于官方 ClewdR。共享逻辑在 web_tools，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。实际模型身份、官方 strict 和 thinking 签名不属于本模式。
+工具适配由 WebCC 实现，独立于官方 ClewdR。共享逻辑在 `web_tools/`，主网关负责鉴权、选号、取消和失败处理，客户端执行自己的业务工具。兼容范围和状态签名见 [API 文档](API-PUBLIC.md)。
 
-[实验接口](docs/EXPERIMENTAL-TOOLS-API.md)说明开启条件和 SDK 用法；[候选验收](docs/WEB-TOOL-GATEWAY.md)记录普通与 SSE 真实流程。测试需安装 requirements-web-tools.txt 的可选依赖，真实 SDK 测试还需 anthropic；正常模式默认关闭，不依赖 SDK。当前生产未启用此策略。
+[服务器验收](tests/live/README.md)说明真实测试的范围和启动条件；[修复验收](docs/FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)保留当前结论与未完成项。仓库保留可维护的测试，不保存逐次原始响应、临时脚本、重复方案或带密钥的交付文档。历史记录已归档到仓库外，Git 历史也可追溯。

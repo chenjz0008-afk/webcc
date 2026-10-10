@@ -1,6 +1,6 @@
 # 外贸业务体验异常与复测待办
 
-2026-10-09 的原始观察，2026-10-10 更新状态。依据：[完整报告](FOREIGN-TRADE-ACCEPTANCE.md)、[逐轮记录](foreign-trade-acceptance-2026-10-09.json)。下表保留发布前观察；当前修复和独立复验见[修复验收](FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)。完整并发矩阵与生产发布尚未完成，ClewdR 未修改。
+2026-10-09 的原始观察，2026-10-10 更新状态。依据：完整报告（历史记录已归档）、逐轮记录（历史记录已归档）。下表保留发布前观察；当前修复和独立复验见[修复验收](FOREIGN-TRADE-REPAIR-ACCEPTANCE.md)。完整并发矩阵与生产发布尚未完成，ClewdR 未修改。
 
 ## 实际观察到的问题
 

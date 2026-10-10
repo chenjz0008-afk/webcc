@@ -58,8 +58,8 @@
 - [程序化工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)
 - [MCP Connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)
 - [公开网页沙箱文件实现记录](https://github.com/glebmish/claude-exporter/blob/main/docs/sandbox-files.md)
-- [本项目公网工具实测](tools-public-live-2026-10-07.json)
+- 本项目公网工具实测（历史记录已归档）
 
-附件候选：120 项完整回归通过；ccb9 的 PDF、PNG 和工具结果 PDF 三组往返共 6 次真实模型请求通过，实际保存值分别为 120、3、120；跨密钥及删除后引用在选号前拒绝。新增附件并发门槛的定向回归与发布另行记录。见 [候选报告](tool-media-candidate-2026-10-07.json)。
+附件候选：120 项完整回归通过；ccb9 的 PDF、PNG 和工具结果 PDF 三组往返共 6 次真实模型请求通过，实际保存值分别为 120、3、120；跨密钥及删除后引用在选号前拒绝。新增附件并发门槛的定向回归与发布另行记录。见 候选报告（历史记录已归档）。
 
-附件工具后端已发布，新增门槛的 37 项定向回归通过；公网上传、工具提议、实际保存、结果回传、删除共 4 次请求成功，保存值 120。记录及模块 SHA256 见 [生产报告](tool-media-production-2026-10-07.json)。
+附件工具后端已发布，新增门槛的 37 项定向回归通过；公网上传、工具提议、实际保存、结果回传、删除共 4 次请求成功，保存值 120。记录及模块 SHA256 见 生产报告（历史记录已归档）。

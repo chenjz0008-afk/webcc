@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 
 APP = Path('/var/lib/webcc-cluster/repair-candidate/app')
 sys.path.insert(0, str(APP))
-sys.path.insert(0, str(APP / 'experiments'))
+sys.path.insert(0, str(APP / 'tests' / 'live'))
 import foreign_trade_load as trade
 from cluster_state import ClusterState
 

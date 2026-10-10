@@ -713,5 +713,22 @@ class ManagerTests(unittest.TestCase):
         self.manager.release(held)
 
 
+class PrivateWriteTests(unittest.TestCase):
+    def test_concurrent_writes_publish_complete_private_files(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from manager import private_write
+        barrier, replace = threading.Barrier(2), os.replace
+        def publish(source, destination):
+            barrier.wait(timeout=5)
+            replace(source, destination)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'settings.json'
+            with patch('manager.os.replace', side_effect=publish), ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(lambda value: private_write(target, value), ('first', 'second')))
+            self.assertIn(target.read_text(), ('first', 'second'))
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(target.parent.glob('*.tmp')), [])
+
+
 if __name__ == "__main__":
     unittest.main()

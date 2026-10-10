@@ -19,3 +19,11 @@ node_modules
 verification.json
 *-preview.jpg
 *-preview.png
+
+# Private delivery and temporary acceptance artifacts
+artifacts/
+reports/
+*.log
+*-raw.txt
+*-candidate*.tar.gz
+交付文档/
