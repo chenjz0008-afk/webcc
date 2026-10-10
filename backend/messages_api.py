@@ -48,7 +48,7 @@ def dispatch(handler, fields):
     history = any(isinstance(b, dict) and b.get('type') in {'tool_use', 'tool_result'}
                   for m in (fields.get('messages') or []) if isinstance(m, dict)
                   for b in (m['content'] if isinstance(m.get('content'), list) else []))
-    if history or any(isinstance(t, dict) and 'input_schema' in t for t in tools) or isinstance(fields.get('output_config'), dict) and fields['output_config'].get('format'):
+    if history or any(isinstance(m, dict) and m.get('role') == 'system' for m in fields.get('messages', [])) or any(isinstance(t, dict) and 'input_schema' in t for t in tools) or isinstance(fields.get('output_config'), dict) and fields['output_config'].get('format'):
         from web_tools.gateway import forward
         import json
         forward(handler, raw=json.dumps(fields).encode(), standard=True)
