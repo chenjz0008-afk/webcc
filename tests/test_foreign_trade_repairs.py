@@ -85,6 +85,26 @@ class EnvelopeTests(unittest.TestCase):
         self.assertIn(' version', issues[1]['detail'])
         self.assertEqual(value['calls'][0]['input'], {'id': 'A', ' version': 0})
 
+    def test_transport_protocol_is_system_instruction_and_history_remains_data(self):
+        from web_tools.api import prepare
+        for system in ('Return concise Markdown.', [{'type': 'text', 'text': 'Return concise Markdown.'}]):
+            request={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'system':system,
+                     'messages':[{'role':'user','content':'Save the authorized draft, then read back.'}]}
+            original=copy.deepcopy(request)
+            _,body=prepare(json.dumps(request),standard=True)
+            upstream=json.loads(body)
+            if isinstance(system,str):
+                self.assertTrue(upstream['system'].startswith(system+'\n\n'))
+                contract=upstream['system']
+            else:
+                self.assertEqual(upstream['system'][:-1],system)
+                contract=upstream['system'][-1]['text']
+            self.assertIn('never outside the JSON object',contract)
+            payload=json.loads(upstream['messages'][0]['content'])
+            self.assertEqual(payload['history'],request['messages'])
+            self.assertEqual(payload['tools'],TOOLS)
+            self.assertEqual(request,original)
+
     def test_call_explanation_is_preserved_and_strict_arguments_wait_for_validation(self):
         request = {'tools': TOOLS, 'messages': []}; output = []
         stream = ToolStream(types.SimpleNamespace(), 'owner', request, output.append)
