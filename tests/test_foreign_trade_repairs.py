@@ -48,6 +48,18 @@ class EnvelopeTests(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(Exception):
                 parse_response(json.dumps({'calls': [call]}), TOOLS)
 
+    def test_misplaced_business_argument_produces_precise_correction_feedback(self):
+        from web_tools.api import complete, OutputProblem
+        value = {'calls': [{'name': 'save', 'input': {'id': 'A'}, 'version': 0}], 'text': ''}
+        raw = json.dumps({'content': [{'type': 'text', 'text': json.dumps(value)}],
+                          'stop_reason': 'end_turn', 'usage': {'input_tokens': 1, 'output_tokens': 1}})
+        with self.assertRaises(OutputProblem) as raised:
+            complete(raw, {'tools': TOOLS, 'messages': []})
+        self.assertEqual(raised.exception.feedback['path'], ['calls', 0])
+        self.assertEqual(raised.exception.feedback['rule'], 'additionalProperties')
+        self.assertIn('version', raised.exception.feedback['detail'])
+        self.assertEqual(value['calls'][0]['input'], {'id': 'A'})
+
     def test_repeated_equal_call_name_is_normalized_once(self):
         raw = '{"calls":[{"name":"save","input":{"id":"中文quote","version":0},"name":"save"}],"text":""}'
         result = parse_response(raw, TOOLS)

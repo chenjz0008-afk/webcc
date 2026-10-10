@@ -225,7 +225,8 @@ def _forward(handler, admit, raw=None, standard=False):
                 text = ''.join(b.get('text', '') for b in previous.get('content', []) if isinstance(b, dict) and b.get('type') == 'text')
                 if len(text.encode()) <= 32768:
                     upstream['messages'].extend([{'role': 'assistant', 'content': text},
-                        {'role': 'user', 'content': 'The previous reply failed tool-choice or JSON Schema validation. Correct it using the declared schemas and original task. Return only the required calls/text JSON object. No tool has executed.'}])
+                        {'role': 'user', 'content': 'The previous reply failed validation: ' + json.dumps(problem.feedback or {}, ensure_ascii=False) +
+                         '. Correct it using the declared schemas and original task. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
                     body = json.dumps(upstream, ensure_ascii=False).encode()
                 continue
             alive()

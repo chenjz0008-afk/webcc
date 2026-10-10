@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 from web_tools import build_prompt, parse_response, check_schema
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 from web_tools.discovery import visible_tools
 from web_tools.media import MAX_REQUEST, separate
 from web_tools.history import bounded_json, load_json
@@ -78,10 +79,11 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=No
 
 
 class OutputProblem(ValueError):
-    def __init__(self, code, message, retry=True, stage=None):
+    def __init__(self, code, message, retry=True, stage=None, feedback=None):
         super().__init__(message)
         self.code, self.retry = code, retry
         self.stage = stage
+        self.feedback = feedback
 
 
 def output_schema(request):
@@ -142,8 +144,14 @@ def complete(raw, request, cache=None, owner=None):
                 'usage': usage if request.get('_standard_tools') else {k: usage[k] for k in ('input_tokens', 'output_tokens')}}
     except OutputProblem:
         raise
-    except Exception:
-        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation', stage=stage) from None
+    except Exception as error:
+        feedback = {'stage': stage}
+        if isinstance(error, ValidationError):
+            feedback.update(path=list(error.absolute_path), rule=error.validator, detail=error.message[:512])
+        elif isinstance(error, ValueError):
+            feedback['detail'] = str(error)[:256]
+        raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation',
+                            stage=stage, feedback=feedback) from None
 
 
 
