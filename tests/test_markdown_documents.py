@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from experiments.markdown_documents import MarkdownDocuments
+from tests.support.markdown_documents import MarkdownDocuments
 
 
 class MarkdownDocumentTests(unittest.TestCase):

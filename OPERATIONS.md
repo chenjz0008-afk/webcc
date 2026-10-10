@@ -146,4 +146,4 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 
 ### 回退到本次部署前入口
 
-本次 Nginx 原配置备份路径见 [验收记录](VERIFICATION.md)。先停止新入口流量并等待当前调用完成，然后恢复对应 Nginx 配置、`sudo nginx -t`、`sudo systemctl enable --now clewdr`、`sudo systemctl reload nginx`。原来进程的账号池为空，回退只是恢复原入口，不能承诺它能立即生成。新管理器账号目录保留，不能把新目录误删。
+本次 Nginx 原配置备份路径见 验收记录（历史记录已归档）。先停止新入口流量并等待当前调用完成，然后恢复对应 Nginx 配置、`sudo nginx -t`、`sudo systemctl enable --now clewdr`、`sudo systemctl reload nginx`。原来进程的账号池为空，回退只是恢复原入口，不能承诺它能立即生成。新管理器账号目录保留，不能把新目录误删。

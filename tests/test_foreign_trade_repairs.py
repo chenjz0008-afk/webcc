@@ -72,6 +72,39 @@ class EnvelopeTests(unittest.TestCase):
                     raw.replace('"version":0', '"version":0,"version":0')):
             with self.assertRaises(ValueError): parse_response(bad, TOOLS)
 
+    def test_missing_and_padded_property_feedback_has_complete_paths(self):
+        from web_tools.api import complete, OutputProblem
+        value = {'calls': [{'name': 'save', 'input': {'id': 'A', ' version': 0}}], 'text': ''}
+        raw = json.dumps({'content': [{'type': 'text', 'text': json.dumps(value)}],
+                          'usage': {'input_tokens': 1, 'output_tokens': 1}, 'stop_reason': 'end_turn'})
+        with self.assertRaises(OutputProblem) as raised:
+            complete(raw, {'tools': TOOLS, 'messages': []})
+        issues = raised.exception.feedback['issues']
+        self.assertEqual({issue['rule'] for issue in issues}, {'required', 'additionalProperties'})
+        self.assertTrue(all(issue['path'] == ['calls', 0, 'input'] for issue in issues))
+        self.assertIn(' version', issues[1]['detail'])
+        self.assertEqual(value['calls'][0]['input'], {'id': 'A', ' version': 0})
+
+    def test_transport_protocol_is_system_instruction_and_history_remains_data(self):
+        from web_tools.api import prepare
+        for system in ('Return concise Markdown.', [{'type': 'text', 'text': 'Return concise Markdown.'}]):
+            request={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'system':system,
+                     'messages':[{'role':'user','content':'Save the authorized draft, then read back.'}]}
+            original=copy.deepcopy(request)
+            _,body=prepare(json.dumps(request),standard=True)
+            upstream=json.loads(body)
+            if isinstance(system,str):
+                self.assertTrue(upstream['system'].startswith(system+'\n\n'))
+                contract=upstream['system']
+            else:
+                self.assertEqual(upstream['system'][:-1],system)
+                contract=upstream['system'][-1]['text']
+            self.assertIn('never outside the JSON object',contract)
+            payload=json.loads(upstream['messages'][0]['content'])
+            self.assertEqual(payload['history'],request['messages'])
+            self.assertEqual(payload['tools'],TOOLS)
+            self.assertEqual(request,original)
+
     def test_call_explanation_is_preserved_and_strict_arguments_wait_for_validation(self):
         request = {'tools': TOOLS, 'messages': []}; output = []
         stream = ToolStream(types.SimpleNamespace(), 'owner', request, output.append)

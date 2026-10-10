@@ -205,6 +205,11 @@ def _forward(handler, admit, raw=None, standard=False):
             status = 504 if result['failure'] == 'TimeoutError' else 502
             last = (status, 'api_error', 'Experimental upstream connection failed')
         elif status >= 400:
+            from worker_errors import no_session
+            if no_session(status, result.get('body', b'')):
+                handler.manager.record_failure(account, 'cookie_pool_unavailable', 503)
+                last = (503, 'overloaded_error', 'Account worker has no available session; retry later', 'cookie_pool_unavailable')
+                continue
             last = (status, 'rate_limit_error' if status == 429 else 'api_error', 'Experimental upstream rejected request')
         else:
             try:
@@ -226,7 +231,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 if len(text.encode()) <= 32768:
                     upstream['messages'].extend([{'role': 'assistant', 'content': text},
                         {'role': 'user', 'content': 'The previous reply failed validation: ' + json.dumps(problem.feedback or {}, ensure_ascii=False) +
-                         '. Correct it using the declared schemas and original task. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
+                         '. Fix every listed issue using the declared schemas and original task. Missing and unexpected property names must be corrected, not repeated. Input property names must match input_schema exactly, with no added spaces. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
                     body = json.dumps(upstream, ensure_ascii=False).encode()
                 continue
             alive()

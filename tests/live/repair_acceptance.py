@@ -2,6 +2,7 @@
 import concurrent.futures
 import json
 import os
+import signal
 from pathlib import Path
 import sys
 import threading
@@ -13,7 +14,7 @@ from dotenv import dotenv_values
 
 APP = Path('/var/lib/webcc-cluster/repair-candidate/app')
 sys.path.insert(0, str(APP))
-sys.path.insert(0, str(APP / 'experiments'))
+sys.path.insert(0, str(APP / 'tests' / 'live'))
 import foreign_trade_load as trade
 from cluster_state import ClusterState
 
@@ -170,6 +171,8 @@ def main():
     cluster = ClusterState(CONFIG['database_url']); keys = []
     report = {'base_url': BASE, 'actual_workbuddy_tested': False, 'rounds': [], 'cases': [], 'supplements': {}}
     samples, stopped = [], threading.Event()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, lambda *_: stopped.set())
     def monitor():
         while not stopped.wait(.25):
             try:
@@ -184,9 +187,13 @@ def main():
         print(json.dumps({'chat': report['chat']}, ensure_ascii=False), flush=True)
         report['supplements'] = supplements(keys[0]['key'], keys[1]['key'])
         print(json.dumps({'supplements': report['supplements']}, ensure_ascii=False), flush=True)
+        if not all(c['pass'] for c in report['chat']) or not all(c['pass'] for c in report['supplements'].values()):
+            raise RuntimeError('Component acceptance failed; load matrix was not started')
         orders = [(1, 2, 4, 8), (4, 1, 8, 2), (2, 8, 1, 4)]
         for repeat, order in enumerate(orders):
             for concurrency in order:
+                if stopped.is_set():
+                    raise RuntimeError('Acceptance stopped; completed rounds retained')
                 trade.ROOT = ROOT / f'round-{repeat}-{concurrency}'; trade.ROOT.mkdir()
                 begin = time.monotonic()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:

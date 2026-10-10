@@ -25,7 +25,7 @@ LiteLLM 提供 Messages 接口和多上游适配，可作为候选组件。是�
 
 ## 网页工具基础实验
 
-已补充固定版本和取舍，并用现有账号执行真实实验，见 [报告](WEB-TOOL-EXPERIMENT.md)。基础可行性通过不替代原生资格或实际应用验收。实验代码隔离在 experiments 中，生产不导入。
+已补充固定版本和取舍，并用现有账号执行真实实验，见 报告（历史记录已归档）。基础可行性通过不替代原生资格或实际应用验收。实验代码隔离在 experiments 中，生产不导入。
 
 ## E01 · 工具历史的接入前检查
 
@@ -85,13 +85,13 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 
 参照 [官方 strict](https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)、[PDF](https://platform.claude.com/docs/en/build-with-claude/pdf-support) 和 [ClewdR 固定转换实现](https://github.com/Xerxes-2/clewdr/blob/061c6d8ac9187148f50c8d806b56962a7f222b6c/src/claude_web_state/transform.rs)。沿用已调研的 LiteLLM 提示适配思路和 jsonschema，不引入第二套网关。官方约束采样无法由本地参数校验替代，响应显式标记 no-native-strict。
 
-修改前 cc1 七种工具选择通过；PNG 与已有 PDF 上传路径通过，但标准 document 输入被忽略。最小修复是在主项目转换输入，不改 ClewdR。非法编码、URL/file_id、原生引用和扩展在选号前拒绝，失败不计入账号异常；同份合成 PDF 在修改后的独立账号路径复验。完整范围及后续依赖见 [网页能力说明](WEB-ACCOUNT-CAPABILITIES.md)。
+修改前 cc1 七种工具选择通过；PNG 与已有 PDF 上传路径通过，但标准 document 输入被忽略。最小修复是在主项目转换输入，不改 ClewdR。非法编码、URL/file_id、原生引用和扩展在选号前拒绝，失败不计入账号异常；同份合成 PDF 在修改后的独立账号路径复验。完整范围及后续依赖见 网页能力说明（历史记录已归档）。
 
 ## C16 / C19 / C20 · 文件和内置能力（2026-10-07）
 
 文件接口对照当前官方 Files 文档和 Python SDK 的 beta=true 路径，复用 python-multipart 0.0.32 与标准 SQLite。选择轻量平台资源库，保持 ClewdR 零修改。候选 PDF 和文本真实引用均返回 120；下载原字节一致，密钥隔离、删除后拒绝和生产账号库未改通过。实现与差异见 [Files](MANAGED-FILES.md)。
 
-先验证网页内置能力再引入服务：官方说明网页免费账号包含搜索、网页读取、代码执行和文件生成。开启并重载后，线上返回真实 web_search；同账号 bash_tool 已执行且返回正确 CSV 内容。故当前不需要为这两种基本能力购买额外服务。Brave/E2B 保留为协议控制和独立生命周期的候选，不将它们加入生产依赖。版本、费用、源码与测试见 [搜索与沙箱](WEB-SEARCH-SANDBOX.md)。
+先验证网页内置能力再引入服务：官方说明网页免费账号包含搜索、网页读取、代码执行和文件生成。开启并重载后，线上返回真实 web_search；同账号 bash_tool 已执行且返回正确 CSV 内容。故当前不需要为这两种基本能力购买额外服务。Brave/E2B 保留为协议控制和独立生命周期的候选，不将它们加入生产依赖。版本、费用、源码与测试见 搜索与沙箱（历史记录已归档）。
 
 ## 2026-10-07 · 附件与客户端工具组合
 
@@ -128,3 +128,10 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 进一步核对用户提供仓库的 [`toolExecution.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/toolExecution.ts)：执行前 `inputSchema.safeParse`，失败经 `formatZodValidationError` 形成模型可见错误；结合 [`StreamingToolExecutor.ts`](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 的 queued/executing/completed/yielded 状态和 [并行结果恢复分析](https://github.com/liuup/claude-code-analysis/blob/main/analysis/04i-session-storage-resume.md)，采用校验、执行、交付和恢复分层。这里是公开客户端代码的设计参考，账号共享队列仍由 WebCC 的 PostgreSQL/Redis 实现。
 
 真实复测发现模型把业务字段放在 `input` 外，三次泛化纠正仍失败。补充通用的校验阶段、字段路径和规则反馈，原始参数不搬动或猜测；仅在该回复尚未交付可执行内容时纠正。日志只记请求 ID 与阶段，不记反馈中的业务内容。错误样本固定为回归测试。
+
+再次复测发现 `" expected_version"` 带前导空格，单条 required 错误没有完整说明未知字段。采用 [jsonschema iter_errors](https://python-jsonschema.readthedocs.io/en/stable/errors/) 返回有界的完整字段错误，并补齐 calls/index/input 路径，原输入保持不变。该分析仓库同样把校验失败交给模型纠正，不能据此承诺不会生成坏参数。官方 strict 的语法约束采样属于服务端能力；仅复制客户端执行器或更换为 TypeScript 不会获得它。参考 [Anthropic 工具设计](https://www.anthropic.com/engineering/writing-tools-for-agents)，将根因样本纳入真实业务验收，先检查结果再追加改动。
+## 2026-10-10：引用定位的职责调整
+
+连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 Claude Code 分析仓库的算法。
+
+原版 ClewdR 的[请求转换](https://github.com/Xerxes-2/clewdr/blob/master/src/claude_web_state/transform.rs)按全局 `web_search` 配置声明网页搜索，当前代码未显示逐请求关闭接口。本次只读核查，没有修改 ClewdR。未知网页工具继续保留防重放边界，JSON 和 SSE 采用相同规则。

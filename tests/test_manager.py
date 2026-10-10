@@ -432,6 +432,21 @@ class ManagerTests(unittest.TestCase):
         self.assertIn("X-Request-Id", headers)
         self.assert_idle()
 
+    def test_empty_cookie_pool_cools_and_switches_without_failure_streak(self):
+        self.second_account()
+        first = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + first['key']] = (500, b'{"error":{"type":"no_cookie_available","message":"worker-secret","code":500}}')
+        status, _, raw = self.request('POST', '/v1/chat/completions', self.payload())
+        self.assertEqual(status, 200)
+        self.assertNotIn(b'worker-secret', raw)
+        self.assertEqual(len(Worker.seen), 2)
+        self.assertEqual(first['status'], 'ready')
+        self.assertEqual(first.get('consecutive_failures', 0), 0)
+        self.assertGreater(first['cooldown_until'], time.time())
+        restored = FakeManager(self.temp.name, 'official:version', 'api-password', 'admin-password')
+        self.assertFalse(restored.available(restored.get_account(self.identity)))
+        self.assert_idle()
+
     def test_empty_response_switches_without_quarantine(self):
         self.second_account()
         first = self.manager.get_account(self.identity)
@@ -491,6 +506,17 @@ class ManagerTests(unittest.TestCase):
             self.manager.probe(self.identity)
         self.assertEqual(self.manager.get_account(self.identity)["status"], "ready")
         self.assertEqual(self.manager.get_account(self.identity)["consecutive_failures"], 1)
+
+    def test_probe_without_cookie_cools_without_permanent_isolation(self):
+        account = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + account['key']] = (500, b'{"error":{"type":"no_cookie_available","code":500}}')
+        with self.assertRaises(Problem) as caught:
+            self.manager.probe(self.identity)
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(account['status'], 'ready')
+        self.assertEqual(account.get('consecutive_failures', 0), 0)
+        self.assertFalse(self.manager.available(account))
+        self.assert_idle()
 
     def test_attempt_limit_does_not_touch_fourth_account(self):
         for letter in "BCD":
@@ -685,6 +711,23 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(account["id"], ids[2])
             self.manager.release(account)
         self.manager.release(held)
+
+
+class PrivateWriteTests(unittest.TestCase):
+    def test_concurrent_writes_publish_complete_private_files(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from manager import private_write
+        barrier, replace = threading.Barrier(2), os.replace
+        def publish(source, destination):
+            barrier.wait(timeout=5)
+            replace(source, destination)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'settings.json'
+            with patch('manager.os.replace', side_effect=publish), ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(lambda value: private_write(target, value), ('first', 'second')))
+            self.assertIn(target.read_text(), ('first', 'second'))
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(target.parent.glob('*.tmp')), [])
 
 
 if __name__ == "__main__":

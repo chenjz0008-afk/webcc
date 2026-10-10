@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 import unittest
-from experiments.document_cases import Documents
+from tests.support.document_cases import Documents
 
 
 class DocumentCaseTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class DocumentCaseTests(unittest.TestCase):
         self.assertEqual(self.store.path('A').read_text(), self.store.original['A'])
 
     def test_review_cannot_be_batched_before_readback_results(self):
-        from experiments.document_cases import run_document_case
+        from tests.support.document_cases import run_document_case
         def call(name, fields, identity):
             return {'type': 'tool_use', 'id': identity, 'name': name, 'input': fields}
         replies = iter([

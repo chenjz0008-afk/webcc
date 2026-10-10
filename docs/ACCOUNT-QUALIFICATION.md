@@ -54,7 +54,7 @@ cc2 首轮网页和原生请求出现 `wreq_error`，重新创建副本后网页
 
 两轮报告均记录生产 registry 未变化。最终检查：11 个生产账号仍 ready，容器 running，均未 OOM；管理服务和 Nginx active；临时测试容器、网络和账号副本已清理。没有触发主项目的账号隔离逻辑。
 
-脱敏记录：[逐账号验收](account-qualification-2026-10-06.json)、[原生诊断与最终检查](account-diagnostic-2026-10-06.json)。可复用测试入口：[说明](../tests/live/README.md)。
+脱敏记录：逐账号验收（历史记录已归档）、原生诊断与最终检查（历史记录已归档）。可复用测试入口：[说明](../tests/live/README.md)。
 
 ## 下一步条件
 

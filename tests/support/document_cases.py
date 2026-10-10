@@ -120,7 +120,7 @@ See [retention reference][policy].
 
 
 def run_document_case(send, directory, render=None):
-    from experiments.web_tools import build_prompt
+    from web_tools import build_prompt
     store = Documents(directory)
     history = [{'role': 'user', 'content': 'First read A, B, MISSING and PRIVATE together in one response. Compare priority-review policies in A and B, not standard review. Change only paragraph B-P2 from 30 to 14 days; preserve A, B-P1, the table, list and reference links. Read B after editing. Call submit_review with exact quotes and source line numbers for A-P2 and updated B-P2 and both observed read error types. Do not fabricate contents for unavailable documents. Then give a concise summary including 30, 14, MISSING and PRIVATE.'}]
     report = {'steps': [], 'pass': False}

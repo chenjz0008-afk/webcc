@@ -11,9 +11,11 @@ def read(response, thinking=False, on_event=None):
         raw = response.read(1048577)
         if len(raw) > 1048576 or response.length not in (None, 0):
             raise ValueError('Upstream response exceeds limit')
-        if thinking:
-            value = json.loads(raw)
-            if isinstance(value, dict) and isinstance(value.get('content'), list):
+        value = json.loads(raw)
+        if isinstance(value, dict) and isinstance(value.get('content'), list):
+            if any(b.get('type') not in {'text', 'thinking', 'redacted_thinking'} for b in value['content']):
+                raise UnexpectedTool('Unexpected built-in tool execution in client-tool mode')
+            if thinking:
                 value['_webcc_thinking'] = [b for b in value['content'] if b.get('type') in {'thinking', 'redacted_thinking'}]
                 value['content'] = [b for b in value['content'] if b.get('type') not in {'thinking', 'redacted_thinking'}]
                 raw = json.dumps(value, ensure_ascii=False).encode()

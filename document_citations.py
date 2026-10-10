@@ -16,7 +16,7 @@ SCHEMA = {'type': 'object', 'properties': {'answer': {'type': 'string', 'minLeng
     'quotes': {'type': 'array', 'minItems': 1, 'maxItems': 16, 'items': {'type': 'object',
         'properties': {'document_index': {'type': 'integer', 'minimum': 0}, 'page': {'type': 'integer', 'minimum': 1},
                        'start': {'type': 'integer', 'minimum': 0}, 'quote': {'type': 'string', 'minLength': 1, 'maxLength': 2048}},
-        'required': ['document_index', 'page', 'start', 'quote'], 'additionalProperties': False}}},
+        'required': ['document_index', 'page', 'quote'], 'additionalProperties': False}}},
     'required': ['answer', 'quotes'], 'additionalProperties': False}
 
 
@@ -83,7 +83,7 @@ def prepare(fields, standard=False, cache=None, owner=None):
     if not sources:
         raise FileProblem(400, 'No citable documents provided')
     result.update(model=fields['model'] if standard else 'webcc-prompt-v1', stream=False, tools=[], output_config={**fields.get('output_config', {}), 'format': {'type': 'json_schema', 'schema': SCHEMA}})
-    instruction = 'Answer from the supplied documents. Return answer and exact supporting quotes. For each quote provide document_index, page and zero-based Unicode start character in that page. Quote must match the original exactly. Do not use titles or context as evidence.'
+    instruction = 'Answer from the supplied documents. Return answer and short exact supporting quotes. For each quote provide document_index, page and quote. The platform locates quotes in the original text; do not calculate character offsets or use website tools. Quote must match the original exactly. Do not use titles or context as evidence.'
     system = result.get('system', '')
     result['system'] = [*system, {'type': 'text', 'text': instruction}] if standard and isinstance(system, list) else system + '\n' + instruction
     bounded_json(result)
@@ -95,12 +95,12 @@ def verify(value, sources):
     Draft202012Validator(SCHEMA).validate(value)
     citations = []
     for quote in value['quotes']:
-        doc, page, start, text = quote['document_index'], quote['page'], quote['start'], quote['quote']
+        doc, page, start, text = quote['document_index'], quote['page'], quote.get('start'), quote['quote']
         if doc >= len(sources) or page > len(sources[doc]['pages']):
             raise FileProblem(502, 'Citation points outside its document')
         source = sources[doc]
         original = source['pages'][page - 1]
-        if original[start:start + len(text)] != text:
+        if start is None or original[start:start + len(text)] != text:
             start = original.find(text)
             if start < 0 or original.find(text, start + 1) >= 0:
                 raise FileProblem(502, 'Citation quote is absent or its location is ambiguous')

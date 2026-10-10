@@ -49,12 +49,13 @@ def prepare(raw, files=None, owner=None, on_media=None, standard=False, cache=No
     schema = output_schema(data)
     if (standard or schema is not None) and 'tools' not in data:
         data['tools'] = []
-    prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard)
+    protocol, prompt = build_prompt(data.get('tools'), data.get('messages'), data.get('tool_choice'), allow_empty=standard or schema is not None, cache=cache, owner=owner, allow_historical=standard, separate_protocol=True)
     if schema is not None:
-        prompt += '\nFor the final answer, text must be a JSON object encoded as a string matching this schema. Keep the calls/text envelope. Schema: ' + json.dumps(schema, ensure_ascii=False)
+        protocol += '\nFor the final answer, text must be a JSON object encoded as a string matching this schema. Keep the calls/text envelope. Schema: ' + json.dumps(schema, ensure_ascii=False)
     system = data.get('system', '')
     if not isinstance(system, str) and not (standard and isinstance(system, list)):
         raise ValueError('Experimental system supports only text')
+    system = [*system, {'type': 'text', 'text': protocol}] if isinstance(system, list) else system + ('\n\n' if system else '') + protocol
     # Bound the full prompt, including system and protocol instructions.
     bounded_json({'system': system, 'prompt': prompt})
     upstream = ({k: v for k, v in data.items() if k not in {'tools', 'tool_choice', 'messages', 'output_config'}} if standard else {})
@@ -148,6 +149,9 @@ def complete(raw, request, cache=None, owner=None):
         feedback = {'stage': stage}
         if isinstance(error, ValidationError):
             feedback.update(path=list(error.absolute_path), rule=error.validator, detail=error.message[:512])
+            feedback['issues'] = [{'path': list(issue.absolute_path), 'rule': issue.validator,
+                                   'detail': issue.message[:512]}
+                                  for issue in getattr(error, 'webcc_errors', [error])]
         elif isinstance(error, ValueError):
             feedback['detail'] = str(error)[:256]
         raise OutputProblem('output_validation_failed', 'Upstream tool or JSON output failed validation',
