@@ -184,6 +184,8 @@ def main():
         print(json.dumps({'chat': report['chat']}, ensure_ascii=False), flush=True)
         report['supplements'] = supplements(keys[0]['key'], keys[1]['key'])
         print(json.dumps({'supplements': report['supplements']}, ensure_ascii=False), flush=True)
+        if not all(c['pass'] for c in report['chat']) or not all(c['pass'] for c in report['supplements'].values()):
+            raise RuntimeError('Component acceptance failed; load matrix was not started')
         orders = [(1, 2, 4, 8), (4, 1, 8, 2), (2, 8, 1, 4)]
         for repeat, order in enumerate(orders):
             for concurrency in order:
