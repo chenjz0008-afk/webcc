@@ -26,9 +26,16 @@ jobs:
           - Runtime file contents match the deployed d60e894 release; ClewdR is unchanged.
           - The complete 96-task business matrix remains pending.
           EOF
-          existing=$(gh pr list --head refactor/project-layout --base main --state open --json url --jq '.[0].url // empty')
-          if [ -n "$existing" ]; then
-            printf '%s\n' "$existing"
-          else
-            gh pr create --base main --head refactor/project-layout --title 'Organize project directories and refresh release documentation' --body-file /tmp/pr-body.md
+          if ! gh pr create --base main --head refactor/project-layout --title 'Organize project directories and refresh release documentation' --body-file /tmp/pr-body.md 2>/tmp/pr-error; then
+            if grep -q 'GitHub Actions is not permitted' /tmp/pr-error; then
+              echo '::error::Repository policy denies GitHub Actions pull request creation'
+            elif grep -q 'Resource not accessible' /tmp/pr-error; then
+              echo '::error::GitHub token cannot access pull request creation'
+            elif grep -q 'already exists' /tmp/pr-error; then
+              echo '::notice::Pull request already exists'
+              exit 0
+            else
+              echo '::error::Pull request creation failed; inspect the GitHub job log'
+            fi
+            exit 1
           fi
