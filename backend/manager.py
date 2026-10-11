@@ -1063,6 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.classifier_request = is_classifier(payload)
                 self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
                 if self.classifier_request:
+                    self.classifier_delimiter = payload['stop_sequences'][0]
                     payload = prepare_classifier(payload)
                     body = json.dumps(payload, ensure_ascii=False).encode()
                 from history_state import verify
@@ -1219,7 +1220,7 @@ class Handler(BaseHTTPRequestHandler):
                     if self.classifier_request:
                         from auxiliary_requests import validate
                         try:
-                            validate(payload)
+                            validate(payload, self.classifier_delimiter)
                         except ValueError:
                             return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                     data = json.dumps(payload, ensure_ascii=False).encode()
@@ -1348,7 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.classifier_request:
                     from auxiliary_requests import validate
                     try:
-                        validate(adapter.result)
+                        validate(adapter.result, self.classifier_delimiter)
                     except ValueError:
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}

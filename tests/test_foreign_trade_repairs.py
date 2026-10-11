@@ -48,6 +48,36 @@ class EnvelopeTests(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(Exception):
                 parse_response(json.dumps({'calls': [call]}), TOOLS)
 
+    def test_native_annotation_ids_do_not_become_client_ids(self):
+        for identity in ('', 'ignored / external:annotation', 'toolu_model'):
+            for before_input in (True, False):
+                call = {'type': 'tool_use', 'id': identity, 'name': 'save'} if before_input else {'name': 'save'}
+                call['input'] = {'id': '中文quote', 'version': 0}
+                if not before_input:
+                    call.update(id=identity, type='tool_use')
+                value = {'calls': [call], 'text': ''}
+                original = copy.deepcopy(value)
+                for width in (1, 7, 1024):
+                    stream = self.check_stream(value, width)
+                    self.assertRegex(stream.calls[0]['id'], r'^toolu_[a-f0-9]{32}$')
+                    self.assertNotEqual(stream.calls[0]['id'], identity)
+                result = parse_response(json.dumps(value), TOOLS)
+                self.assertRegex(result['content'][0]['id'], r'^toolu_[a-f0-9]{32}$')
+                self.assertEqual(result['content'][0]['input'], call['input'])
+                self.assertEqual(value, original)
+
+    def test_annotation_ids_do_not_relax_arguments_or_metadata_types(self):
+        for identity in (None, 0, {}, 'x' * 201):
+            call = {'type': 'tool_use', 'id': identity, 'name': 'save',
+                    'input': {'id': 'A', 'version': 0}}
+            with self.subTest(identity=identity), self.assertRaises(Exception):
+                parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
+        for inputs in ({'id': 'A', 'version': '0'}, {'id': 'A'},
+                       {'id': 'A', 'version': 0, 'unexpected': True}):
+            call = {'type': 'tool_use', 'id': '', 'name': 'save', 'input': inputs}
+            with self.subTest(inputs=inputs), self.assertRaises(Exception):
+                parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
+
     def test_misplaced_business_argument_produces_precise_correction_feedback(self):
         from web_tools.api import complete, OutputProblem
         value = {'calls': [{'name': 'save', 'input': {'id': 'A'}, 'version': 0}], 'text': ''}
@@ -134,7 +164,7 @@ class EnvelopeTests(unittest.TestCase):
 
     def test_standard_text_blocks_keep_order_without_creating_extra_operations(self):
         call = {'name': 'save', 'input': {'id': '中文quote', 'version': 0}}
-        note = {'type': 'text', 'text': '保存后回读'}
+        note = {'type': 'text', 'text': '保存后回读', 'id': ''}
         for items in ([call, note], [note, call], [note, call, note], [call, {**note, 'text': ''}]):
             value = {'calls': items, 'text': ''}
             raw = json.dumps(value, ensure_ascii=False)

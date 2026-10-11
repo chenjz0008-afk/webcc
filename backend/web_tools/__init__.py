@@ -109,6 +109,12 @@ def build_prompt(tools, history, choice=None, allow_empty=False, cache=None, own
     return (protocol, encoded) if separate_protocol else protocol + '\n' + encoded
 
 
+def check_model_id(value):
+    # Model annotations never become client tool IDs; the gateway generates them.
+    if not isinstance(value, str) or len(value) > 200:
+        raise ValueError('Invalid model tool metadata ID')
+
+
 def normalize_envelope(response):
     if not isinstance(response, dict):
         return response
@@ -119,13 +125,12 @@ def normalize_envelope(response):
         for call in calls:
             if isinstance(call, dict):
                 call = dict(call)
+                if 'id' in call and call.get('type') in {'tool_use', 'text'}:
+                    check_model_id(call.pop('id'))
                 if call.get('text') == '' and call.get('type') != 'text':
                     call.pop('text')
                 if call.get('type') == 'tool_use':
                     call.pop('type')
-                    identity = call.get('id')
-                    if identity is not None and isinstance(identity, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,200}', identity):
-                        call.pop('id')
             response['calls'].append(call)
         response.setdefault('text', '')
     return response

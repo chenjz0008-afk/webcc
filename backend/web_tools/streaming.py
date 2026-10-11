@@ -7,7 +7,7 @@ from history_state import seal
 from message_stream import event, block_events
 from web_tools.discovery import visible_tools
 from web_tools.history import load_json, MAX_BYTES
-from web_tools import validate_call
+from web_tools import validate_call, check_model_id
 
 
 class ToolStream:
@@ -120,9 +120,7 @@ class ToolStream:
                 raise ValueError('Unknown content metadata type')
             self.current['type'] = value
         elif prefix == 'calls.item.id':
-            import re
-            if kind != 'string' or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', value):
-                raise ValueError('Invalid model tool metadata ID')
+            check_model_id(value)
         elif prefix == 'calls.item' and kind == 'start_map':
             self.current, self.input_parts = {}, []
             self.call_keys = set()
@@ -145,7 +143,7 @@ class ToolStream:
                 self.output('content_block_delta', index=self.index, delta={'type': 'input_json_delta', 'partial_json': part})
         elif prefix == 'calls.item' and kind == 'end_map':
             if self.current.get('type') == 'text':
-                if self.call_keys != {'type', 'text'}:
+                if self.call_keys - {'id'} != {'type', 'text'}:
                     raise ValueError('Invalid text content block')
                 self.flush_text()
                 self.append_text(self.current['text'])

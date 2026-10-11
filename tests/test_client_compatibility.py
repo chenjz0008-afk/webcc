@@ -50,6 +50,17 @@ class ReviewTests(unittest.TestCase):
         for reason in ('max_tokens','refusal'):
             with self.assertRaises(ValueError):validate({'content':[{'type':'text','text':'<severity>2</severity>'}],'stop_reason':reason})
 
+    def test_block_protocol_preserves_real_verdict_and_stop_delimiter(self):
+        self.assertTrue(is_classifier({**review(), 'stop_sequences':['</block>']}))
+        for text in ('<block>no</block>', '<block>yes</block>',
+                     '<block>yes</block><category>Data Exfiltration</category><reason>[Data Exfiltration] Sends private data.</reason>'):
+            message={'content':[{'type':'text','text':text}],'stop_reason':'end_turn'}
+            original=copy.deepcopy(message);validate(message,'</block>');self.assertEqual(message,original)
+        validate({'content':[{'type':'text','text':'<block>yes'}], 'stop_reason':'stop_sequence','stop_sequence':'</block>'},'</block>')
+        for text in ('','<block>maybe</block>','<block>no','<severity>2</severity>',
+                     '<block>no</block><category>Data Exfiltration</category><reason>Conflicting verdict</reason>'):
+            with self.assertRaises(ValueError):validate({'content':[{'type':'text','text':text}],'stop_reason':'end_turn'},'</block>')
+
     def test_terminal_tool_output_never_leaks_the_transport_envelope(self):
         request,_=prepare_tools(json.dumps({'model':'fixture','max_tokens':64,'tools':[],
             'thinking':{'type':'disabled'},'messages':[{'role':'user','content':'Answer'}]}),standard=True)
@@ -112,6 +123,15 @@ class GatewayCompatibilityTests(unittest.TestCase):
         for text in ('<severity>2</severity>','<severity>72</severity><category>Data Exfiltration</category>'):
             self.reply([{'type':'thinking','thinking':'Synthetic reasoning'},{'type':'text','text':text}])
             status,_,raw=self.request('POST','/v1/messages',review())
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':text}])
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
+            self.assert_idle()
+
+    def test_new_classifier_allow_and_block_are_forwarded_unchanged(self):
+        for text in ('<block>no</block>', '<block>yes</block>'):
+            self.reply([{'type':'thinking','thinking':'Synthetic reasoning'},{'type':'text','text':text}])
+            status,_,raw=self.request('POST','/v1/messages',{**review(),'stop_sequences':['</block>']})
             self.assertEqual(status,200)
             self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':text}])
             self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
