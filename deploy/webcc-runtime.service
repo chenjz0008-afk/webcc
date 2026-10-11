@@ -1,7 +1,8 @@
 [Unit]
 Description=WebCC durable tasks worker
 After=clewdr-manager.service
-Requires=clewdr-manager.service
+Wants=clewdr-manager.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -9,7 +10,7 @@ User=root
 WorkingDirectory=/opt/clewdr-manager
 EnvironmentFile=/etc/clewdr-manager.env
 ExecStart=/var/lib/webcc-cluster/venv/bin/python -m runtime_queue
-Restart=on-failure
+Restart=always
 RestartSec=5
 UMask=0077
 NoNewPrivileges=true

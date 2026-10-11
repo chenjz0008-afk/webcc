@@ -67,6 +67,11 @@ def fetch(url):
                         size+=len(part)
                         if size>2097152:raise FileProblem(413,'Source page exceeds 2 MiB')
                         parts.append(part)
+                    if response.headers.get('content-type', '').split(';')[0].strip().lower() == 'text/plain':
+                        raw = b''.join(parts)
+                        if len(raw) > 262144:
+                            raise FileProblem(413, 'Source text exceeds 256 KiB')
+                        return {'url': url, 'text': raw.decode('utf-8-sig', errors='replace')}
                     if not PARSE_SLOT.acquire(timeout=2):raise FileProblem(429, 'Source extraction is busy')
                     try:
                         result=subprocess.run([sys.executable,'-I',str(Path(__file__).with_name('html_text.py'))],input=b''.join(parts),capture_output=True,timeout=6,cwd='/tmp',env={})

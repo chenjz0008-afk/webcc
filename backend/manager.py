@@ -1070,6 +1070,8 @@ class Handler(BaseHTTPRequestHandler):
                 verify(self.manager, self.caller_key or 'platform', payload)
                 from native_events import restore
                 restore(self.manager, self.caller_key or 'platform', payload)
+                from search_domains import SearchDomains
+                self.search_policy = SearchDomains.prepare(payload)
                 from messages_api import dispatch
                 if self.manager.web_tools_enabled and payload.get('model') != 'webcc-prompt-v1' and dispatch(self, payload):
                     return
@@ -1311,7 +1313,8 @@ class Handler(BaseHTTPRequestHandler):
     def forward_native(self, account, response, connection):
         from native_events import NativeEvents
         from message_stream import Stream
-        adapter = NativeEvents(self.manager, self.caller_key or 'platform', thinking=getattr(self, 'include_thinking', True))
+        adapter = NativeEvents(self.manager, self.caller_key or 'platform', thinking=getattr(self, 'include_thinking', True),
+                               search_policy=getattr(self, 'search_policy', None))
         state, visible, pending, size = StreamState(), StreamState(), [], 0
         self.adapter = 'webcc-native-v1'
         output = Stream(self)

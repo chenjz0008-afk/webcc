@@ -275,6 +275,8 @@ Files 提供上传、查询、下载和删除，并按调用密钥隔离。UTF-8
 | 远程 MCP | Messages 声明 mcp_servers 与 mcp_toolset，仅连接管理员允许的 HTTPS 服务 | mcp、messages |
 | 工具目录检索 | POST /v1/tools/search，传入 tools、query 和可选 limit | experimental_tools |
 
+联网搜索可声明 `web_search_20250305`，并设置 `allowed_domains` 或 `blocked_domains`。域名规则包含子域名，可附路径。WebCC 过滤返回来源，并提供允许来源的可核验摘录；没有匹配来源时明确返回无匹配结果。此限制作用于返回内容，不保证网页上游的内部检索范围。
+
 ### 文件上传与引用
 
 ```bash
