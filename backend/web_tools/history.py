@@ -55,8 +55,8 @@ def check_choice(choice, tools):
 
 
 def check_history(history, tools, allow_historical=False, standard=False):
-    if not isinstance(history, list) or not history or len(history) > 128:
-        raise ValueError('Experimental history requires 1 to 128 messages')
+    if not isinstance(history, list) or not history or not standard and len(history) > 128:
+        raise ValueError('History must be nonempty; experimental history permits at most 128 messages')
     schemas = {t['name']: t['input_schema'] for t in tools}
     visible = {t['name'] for t in tools if not t.get('defer_loading', False)}
     pending, seen, previous = set(), set(), None
@@ -88,17 +88,22 @@ def check_history(history, tools, allow_historical=False, standard=False):
                 if not isinstance(block.get(field), str) or 'signature' in block and not isinstance(block['signature'], str):
                     raise ValueError('Invalid thinking history')
             elif kind == 'tool_use':
-                if role != 'assistant' or set(block) - {'type', 'id', 'name', 'input', 'cache_control'} or not {'id', 'name', 'input'} <= set(block):
+                if role != 'assistant' or set(block) - {'type', 'id', 'name', 'input', 'cache_control', *(['caller', 'toolset_name'] if standard else [])} or not {'id', 'name', 'input'} <= set(block):
                     raise ValueError('Unsupported tool call')
+                caller = block.get('caller')
+                if caller is not None and (not isinstance(caller, dict) or caller != {'type': 'direct'}):
+                    raise ValueError('Client tool history requires a direct caller')
+                family = block.get('toolset_name')
+                if family is not None and (not isinstance(family, str) or not 1 <= len(family) <= 128):
+                    raise ValueError('Invalid historical toolset name')
                 identity = block['id']
                 if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', identity) or identity in seen:
                     raise ValueError('Invalid or reused tool ID')
                 name = block['name']
                 if (not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', name) or
-                        not isinstance(block['input'], dict) or name in schemas and name not in visible or
-                        name not in schemas and not allow_historical):
+                        not isinstance(block['input'], dict) or not allow_historical and (name not in schemas or name not in visible)):
                     raise ValueError('Unknown historical tool or invalid input')
-                if name in schemas:
+                if name in schemas and not allow_historical:
                     Draft202012Validator(schemas[name]).validate(block['input'])
                 seen.add(identity)
                 calls.add(identity)

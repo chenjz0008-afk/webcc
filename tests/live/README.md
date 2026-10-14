@@ -22,7 +22,10 @@ sudo python3 tests/live/account_qualification.py
 | repair_candidate.py | 独立测试库和服务器本地候选入口；与生产共享账号占用上限 |
 | repair_acceptance.py | SDK、文件、来源与 1/2/4/8 并发业务矩阵 |
 | sdk_request.mjs | TypeScript SDK 的消息和流式工具往返 |
+| long_tasks.py | 同一调用身份逐轮强制换号；报价、营销草稿、库存修改、回读、慢工具、缺失和版本冲突恢复；133 条历史边界及四并发隔离 |
 
 这些脚本只在服务器上显式执行，普通单元测试不启动它们。候选路径为 `/var/lib/webcc-cluster/repair-candidate`，数据库及 Redis 必须与生产分离。先将 backend/ 的内容复制到候选 app 根目录，将 tests/ 放到 app/tests/，再使用服务器私有启动配置；凭据不进入 Git。
 
 真实测试消耗账号额度及 E2B 资源。报告、工作区和原始响应留在服务器受限目录；公开提交只保留汇总结论。结束后检查临时密钥、任务、文件及账号占用已清理。
+
+`long_tasks.py` 默认使用公网入口，在服务器显式运行。`--boundary` 测试超过 128 条消息的历史；`WEBCC_LONG_BASE` 可指定服务器回环候选入口，`WEBCC_LONG_RESULTS` 指定私有记录目录。强制换号仅修改测试专用密钥的账号范围，保持密钥身份不变，结束后撤销并删除临时密钥。生产账号状态不为测试调整。真实业务工具由测试客户端执行并回传，不能将 HTTP 200 当作修改完成。

@@ -195,6 +195,57 @@ class GatewayIncrementalTests(unittest.TestCase):
         self.assertEqual(feedback['issues'][0]['path'],feedback['path'])
         self.assertEqual(first['status'],'ready');self.assert_idle()
 
+    def test_scoped_single_account_can_correct_strict_stream_arguments(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        account=self.manager.get_account(self.identity)
+        key=self.manager.api_keys.create({'name':'one account','accounts':[self.identity],'scopes':['messages']})
+        original=Worker.do_POST
+        def replies(worker):
+            value={'calls':[{'name':'read','input':{'id':'invalid'}}],'text':''} if not Worker.seen else {'calls':[{'name':'read','input':{'id':'A'}}],'text':''}
+            Worker.replies['Bearer '+account['key']]=(200,raw_output(value))
+            original(worker)
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'stream':True,'tools':[{**t,'strict':True} for t in TOOLS],
+              'messages':[{'role':'user','content':'Read A'}]}
+        with patch.object(Worker,'do_POST',replies):status,_,raw=self.request('POST','/v1/messages',body,key=key['key'])
+        self.assertEqual(status,200)
+        self.assertEqual(len(Worker.seen),2)
+        self.assertNotIn(b'event: error',raw)
+        self.assertEqual(raw.count(b'event: content_block_start'),1)
+        self.assertIn(b'message_stop',raw)
+        self.assertEqual(account['status'],'ready');self.assert_idle()
+
+    def test_scoped_format_repair_is_bounded_and_does_not_quarantine(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        account=self.manager.get_account(self.identity)
+        Worker.replies['Bearer '+account['key']]=(200,raw_output({'calls':[{'name':'read','input':{'id':'invalid'}}],'text':''}))
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'messages':[{'role':'user','content':'Read A'}]}
+        status,_,raw=self.request('POST','/v1/messages',body)
+        self.assertEqual(status,502)
+        self.assertEqual(len(Worker.seen),self.manager.retry_attempts)
+        self.assertEqual(json.loads(raw)['error']['code'],'output_validation_failed')
+        self.assertEqual(account['status'],'ready');self.assert_idle()
+
+    def test_proxy_connect_cools_before_release_and_keeps_history_on_failover(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        first=self.manager.get_account(self.identity)
+        second=self.manager.add({'name':'second','sessionKey':'sk-ant-sid02-'+'B'*100+'-ABCDEF'+'AA','proxy':'127.0.0.1:1080:u:p'})
+        Worker.replies['Bearer '+first['key']]=(500,json.dumps({'error':{'type':'wreq_error','message':'Failed to bootstrap: client error (ProxyConnect)'}}).encode())
+        Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,raw_output())
+        original=self.manager.release;checked=[]
+        def release(account):
+            if account['id']==self.identity:
+                self.assertGreater(account['cooldown_until'],time.time());checked.append(True)
+            original(account)
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'messages':[{'role':'user','content':'Read A'}]}
+        with patch.object(self.manager,'release',release):status,_,raw=self.request('POST','/v1/messages',body)
+        self.assertEqual(status,200);self.assertEqual(checked,[True])
+        self.assertEqual(len(Worker.seen),2);self.assertEqual(Worker.seen[0]['body'],Worker.seen[1]['body'])
+        self.assertEqual(first['consecutive_failures'],1);self.assertEqual(first['status'],'ready')
+        self.request('POST','/v1/messages',body)
+        self.assertEqual(Worker.seen[-1]['headers']['Authorization'],'Bearer '+self.manager.get_account(second)['key'])
+        self.manager.record_failure(first,'proxy_connect',500);self.manager.record_failure(first,'proxy_connect',500)
+        self.assertEqual(first['status'],'quarantined');self.assert_idle()
+
 class SourceGuards(unittest.TestCase):
     def test_source_fetch_never_falls_back_to_direct_and_rejects_private_dns(self):
         from source_text import fetch,target

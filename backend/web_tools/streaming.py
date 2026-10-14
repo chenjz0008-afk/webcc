@@ -7,7 +7,7 @@ from history_state import seal
 from message_stream import event, block_events
 from web_tools.discovery import visible_tools
 from web_tools.history import load_json, MAX_BYTES
-from web_tools import validate_call, check_model_id
+from web_tools import validate_call, check_model_id, envelope_json
 
 
 class ToolStream:
@@ -23,6 +23,7 @@ class ToolStream:
         self.pending_thoughts = []
         self.root_keys, self.call_keys = set(), set()
         self.calls_closed = False
+        self.envelope_closed = False
         self.parser = ijson.parse_coro(self)
 
     def output(self, kind, **fields):
@@ -99,7 +100,9 @@ class ToolStream:
 
     def send(self, item):
         prefix, kind, value = item
-        if prefix == 'calls' and kind == 'end_array':
+        if prefix == '' and kind == 'end_map':
+            self.envelope_closed = True
+        elif prefix == 'calls' and kind == 'end_array':
             self.calls_closed = True
         elif prefix == '' and kind == 'map_key':
             if value not in {'calls', 'text'} or value in self.root_keys:
@@ -166,10 +169,16 @@ class ToolStream:
         self.raw += value.encode()
         if len(self.raw) > MAX_BYTES:
             raise ValueError('Tool stream exceeds limit')
-        self.parser.send(value.encode())
+        if not self.envelope_closed:
+            try:
+                self.parser.send(value.encode())
+            except ijson.JSONError:
+                if not self.envelope_closed:
+                    raise
+        raw = envelope_json(self.raw.decode(), partial=True).encode() if self.envelope_closed else self.raw
         if 'text' not in self.root_keys or self.active and self.active['type'] != 'text':
             return
-        partial = jiter.from_json(self.raw, partial_mode='trailing-strings')
+        partial = jiter.from_json(raw, partial_mode='trailing-strings')
         text = partial.get('text', '') if isinstance(partial, dict) else ''
         if isinstance(text, str) and text and (not self.active or self.active['type'] == 'text'):
             if self.calls_closed and not self.calls and (self.request.get('tool_choice') or {}).get('type') in {'any', 'tool'}:
@@ -213,7 +222,14 @@ class ToolStream:
     def finish(self, message):
         if self.failed:
             raise ValueError('Invalid incremental tool response')
-        self.parser.close()
+        if self.envelope_closed:
+            envelope_json(self.raw.decode())
+            try:
+                self.parser.close()
+            except ijson.JSONError:
+                pass
+        else:
+            self.parser.close()
         tools = [b for b in message['content'] if b['type'] == 'tool_use']
         expected = [{'name': b['name'], 'input': b['input']} for b in tools]
         actual = [{'name': b['name'], 'input': b['input']} for b in self.calls]

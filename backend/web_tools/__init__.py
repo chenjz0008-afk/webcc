@@ -138,6 +138,15 @@ def normalize_envelope(response):
     return response
 
 
+def envelope_json(text, partial=False):
+    text = text.lstrip()
+    _, end = json.JSONDecoder().raw_decode(text)
+    tail = text[end:].strip()
+    if tail not in ('', '</parameter>') and not (partial and '</parameter>'.startswith(tail)):
+        raise ValueError('Unexpected content after tool envelope')
+    return text[:end]
+
+
 def load_envelope(text):
     class Pairs(list):
         pass
@@ -157,7 +166,7 @@ def load_envelope(text):
         return value
     def invalid_constant(value):
         raise ValueError('Non-JSON numeric constant')
-    return restore(json.loads(text, object_pairs_hook=Pairs, parse_constant=invalid_constant))
+    return restore(json.loads(envelope_json(text), object_pairs_hook=Pairs, parse_constant=invalid_constant))
 
 
 def validate_call(call, tools, choice=None, count=0):

@@ -788,6 +788,8 @@ class Manager:
             elif kind != "empty_response" and (status is None or status >= 500):
                 failures = account.get("consecutive_failures", 0) + 1
                 account["consecutive_failures"] = failures
+                if kind == 'proxy_connect':
+                    account['cooldown_until'] = time.time() + 60
                 if failures >= self.failure_threshold:
                     account.update(status="quarantined", reason=f"连续 {failures} 次通道失败；最近错误：{kind}")
             self.save()
@@ -809,11 +811,11 @@ class Manager:
                 raise Problem(503, "节点拒绝转发，请检查节点服务")
             data = response.read(1024 * 1024)
             if response.status != 200:
-                from worker_errors import no_session
+                from worker_errors import no_session, proxy_connect
                 if no_session(response.status, data):
                     self.record_failure(account, 'cookie_pool_unavailable', 503)
                     raise Problem(503, '账号通道当前无可用会话，请稍后重试')
-                self.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
+                self.record_failure(account, 'proxy_connect' if proxy_connect(response.status, data) else "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
                 raise Problem(502, "生成验证失败，HTTP " + str(response.status))
             payload = json.loads(data)
             content = payload["choices"][0]["message"]["content"]
@@ -1208,12 +1210,13 @@ class Handler(BaseHTTPRequestHandler):
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
             if response.status >= 400:
-                from worker_errors import no_session
-                if no_session(response.status, response.read(65537)):
+                from worker_errors import no_session, proxy_connect
+                error_body = response.read(65537)
+                if no_session(response.status, error_body):
                     self.manager.record_failure(account, 'cookie_pool_unavailable', 503)
                     return 503, '账号通道当前无可用会话，请稍后重试'
                 if response.status in {401, 403, 429} or response.status >= 500:
-                    self.manager.record_failure(account, "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
+                    self.manager.record_failure(account, 'proxy_connect' if proxy_connect(response.status, error_body) else "HTTP " + str(response.status), response.status, response.getheader("Retry-After"))
                 if response.status in {401, 403, 429} or response.status >= 500:
                     return response.status, "账号服务返回 HTTP " + str(response.status)
                 self.respond(response.status, {"error": {"message": "账号服务返回 HTTP " + str(response.status), "type": "upstream_error"}})

@@ -183,3 +183,12 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 后台预热复用 PostgreSQL/Redis 账号租约与队列，不计业务派发；按节点保留小池，内存门槛使用 320/256 MiB 滞回，避免内存边缘反复启停。远程就绪提示是有 TTL 的优化信息，通过单次 Redis MGET 获取，不替代权限、租约或运行状态检查。节点退出先停止维护并等当前预热结束，再关闭共享状态连接。复用现有线程/asyncio，不新增服务或依赖。
 
 预热不执行模型或业务工具，因此使用独立占位类型，绑定 PostgreSQL backend PID 与 backend_start。启动及维护通过 pg_stat_activity 仅回收已无对应连接的预热占位，PID 复用时仍可识别。正常请求占位不能靠年龄自动释放；预热占位也不能被节点 claim 为模型任务。增加连接关闭、SIGKILL、普通占位保护和 PID 复用的真实独立数据库验收。
+### 2026-10-15 · 长任务与账号交接
+
+先以真实上游复现 133 条历史被网关拦截、官方 SDK 完整序列化回传被拒、工具 Schema 更新重判旧调用、格式纠正排除唯一账号，以及合法 JSON 后追加 `</parameter>` 引发流式失败。合成测试原文与服务器工具结果留在仓库外；不把输出 HTTP 200 当作业务成功。
+
+协议依据为 [官方 Messages SDK 的历史工具块定义](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/tool_use_block_param.py) 和 [SDK 响应模型的默认空字段](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/tool_use_block.py)。复用现有 JSON Schema、ijson/jiter、PostgreSQL 租约，不引入宽松 JSON 修补器、第二套会话数据库或隐藏摘要。严格解析一个 JSON 文档，仅兼容已观测的外部尾标记；字符串、工具参数和历史保持原样。未交付时允许有界纠正，交付后不自动重放。
+
+参考 [Anthropic 长任务工程实践](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) 的实际文件、版本、进度与回读验收；[上下文管理](https://platform.claude.com/docs/en/build-with-claude/context-windows) 明确上下文容量与压缩的区别。用户提供的 [StreamingToolExecutor 分析代码](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 用于对照工具 ID、执行与结果状态分离；协议以官方资料为准，不据分析仓库声称复刻官方隐藏状态。
+
+真实代理 `ProxyConnect` 错误与 JSON 校验失败分开处理。临时冷却在释放占用前记录，阻止后续请求马上再次选中已知故障出口；保留原三次连续失败隔离及代理出口限制。Python 编解码不是这轮秒级等待的已确认根因，不为此重写语言或调高模型并发。
