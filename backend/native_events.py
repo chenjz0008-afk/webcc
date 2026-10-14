@@ -16,12 +16,14 @@ def source_token(manager,owner,source):
 
 
 class NativeEvents:
-    def __init__(self,manager,owner,thinking=True):
+    def __init__(self,manager,owner,thinking=True,search_policy=None):
         self.manager,self.owner=manager,owner
         self.buffer,self.model=b'','unknown'
         self.blocks,self.sources,self.words={},{},{}
         self.result=None; self.inputs={}; self.finished=False
         self.thinking, self.hidden, self.indices = thinking, set(), {}
+        self.search_policy, self.search_started, self.filtered_text = search_policy, False, set()
+        self.search_summary_sent = False
 
     def visible(self, value):
         kind, index = value.get('type'), value.get('index')
@@ -44,9 +46,12 @@ class NativeEvents:
         if kind=='content_block_start':
             block=value['content_block'];self.blocks[index]=copy.deepcopy(block)
             if block['type']=='tool_use' and block.get('name') in {'web_search','web_fetch'}:
+                self.search_started |= block.get('name') == 'web_search'
                 value['content_block']={k:block[k] for k in ('id','name','input')};value['content_block']['type']='server_tool_use'
             elif block['type']=='tool_result' and block.get('name') in {'web_search','web_fetch'}:
                 entries=[s for s in block.get('content',[]) if isinstance(s,dict) and s.get('type')=='knowledge' and isinstance(s.get('url'),str)]
+                if self.search_policy and block['name'] == 'web_search':
+                    entries = [s for s in entries if self.search_policy.accepts(s['url'])]
                 for s in entries:self.sources[s['url']]=s
                 if block['name']=='web_search':
                     content=[{'type':'web_search_result','url':s['url'],'title':s.get('title',''),
@@ -67,8 +72,13 @@ class NativeEvents:
                     value['content_block']={'type':'web_fetch_tool_result','tool_use_id':block['tool_use_id'],'content':content}
             elif block['type']=='text':
                 value['content_block']={k:v for k,v in block.items() if k in ('type','text','citations')}
+                if self.search_policy and self.search_started:
+                    self.filtered_text.add(index)
+                    value['content_block'] = {'type': 'text', 'text': ''}
         elif kind=='content_block_delta':
             delta=value['delta'];typ=delta.get('type')
+            if index in self.filtered_text:
+                return []
             block=self.blocks.get(index,{})
             if typ=='thinking_delta':block['thinking']=block.get('thinking','')+delta['thinking']
             elif typ=='signature_delta':block['signature']=block.get('signature','')+delta['signature']
@@ -88,10 +98,25 @@ class NativeEvents:
                     return []
             elif typ in {'citation_end_delta','tool_use_block_update_delta'}:return []
         elif kind=='content_block_stop':
+            if index in self.filtered_text:
+                packets = []
+                if not self.search_summary_sent:
+                    summary = self.search_policy.summary(self.manager, self.owner, self.sources)
+                    packets.append(event('content_block_delta', index=index, delta={'type': 'text_delta', 'text': summary}))
+                    self.search_summary_sent = True
+                return [*packets, event(kind, index=index)]
             block=self.blocks.get(index,{})
             if block.get('type')=='thinking' and not block.get('signature'):
                 signed=seal(self.manager,self.owner,block,self.model)
                 return [event('content_block_delta',index=index,delta={'type':'signature_delta','signature':signed['signature']}),event(kind,**{k:v for k,v in value.items() if k!='type'})]
+        elif kind=='message_delta' and self.search_policy and self.search_started and not self.search_summary_sent:
+            index = max(self.blocks, default=-1) + 1
+            self.blocks[index] = {'type': 'text', 'text': ''}
+            summary = self.search_policy.summary(self.manager, self.owner, self.sources)
+            self.search_summary_sent = True
+            return [event('content_block_start', index=index, content_block=self.blocks[index]),
+                    event('content_block_delta', index=index, delta={'type': 'text_delta', 'text': summary}),
+                    event('content_block_stop', index=index), event(kind, **{k:v for k,v in value.items() if k!='type'})]
         return [event(kind,**{k:v for k,v in value.items() if k!='type'})]
 
     def feed(self,chunk):

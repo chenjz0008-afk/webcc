@@ -134,6 +134,13 @@ class ManagerTests(unittest.TestCase):
                 body = {**self.payload(), "tools": [{"name": "lookup", "input_schema": {"type": "object"}}]}
                 if path.startswith('/v1/chat/completions'):
                     body = self.payload()
+                    from message_stream import events
+                    key = 'Bearer ' + self.manager.get_account(self.identity)['key']
+                    message={'id':'msg_fixture','type':'message','role':'assistant','model':'actual-model',
+                             'content':[{'type':'text','text':'OK'}],'stop_reason':'end_turn',
+                             'usage':{'input_tokens':1,'output_tokens':1}}
+                    Worker.replies[key]=(200,b''.join(events(message)),'text/event-stream')
+                    self.manager.web_tools_enabled = True
                 if path.startswith('/v1/messages'):
                     key = 'Bearer ' + self.manager.get_account(self.identity)['key']
                     Worker.replies[key] = (200, json.dumps({'model':'actual-model','content':[{'type':'text','text':'{"calls":[{"name":"lookup","input":{}}],"text":""}'}], 'stop_reason':'end_turn','usage':{'input_tokens':1,'output_tokens':1}}).encode())
@@ -147,8 +154,13 @@ class ManagerTests(unittest.TestCase):
                     self.assert_idle()
                     Worker.replies = {}
                     continue
-                self.assertEqual(Worker.seen[-1]["path"], path)
-                self.assertEqual(json.loads(Worker.seen[-1]["body"]), body)
+                if path.startswith('/v1/chat/completions'):
+                    self.assertEqual(Worker.seen[-1]['path'],'/v1/messages?trace=one%20two')
+                    self.assertEqual(json.loads(response)['choices'][0]['message']['content'],'OK')
+                    self.assertEqual(json.loads(response)['model'],'actual-model')
+                else:
+                    self.assertEqual(Worker.seen[-1]["path"], path)
+                    self.assertEqual(json.loads(Worker.seen[-1]["body"]), body)
                 self.assertNotIn("x-api-key", {k.lower(): v for k, v in Worker.seen[-1]["headers"].items()})
                 self.assert_idle()
 

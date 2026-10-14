@@ -10,6 +10,8 @@
 
 ## 服务器位置
 
+`webcc-runtime` 使用 `Restart=always`，进程退出后等待 5 秒重启；管理服务重启不会永久停止任务进程。人工 `systemctl stop webcc-runtime` 仍会保持停止。任务恢复继续使用既有 PostgreSQL 队列与心跳，不通过进程重启直接重复业务工具操作。
+
 | 项目 | 路径 / 地址 |
 |---|---|
 | 项目代码与前端产物 | `/opt/clewdr-manager` |

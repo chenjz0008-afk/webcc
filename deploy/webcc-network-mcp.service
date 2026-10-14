@@ -1,0 +1,25 @@
+[Unit]
+Description=WebCC read-only network MCP
+After=clewdr-manager.service
+Wants=clewdr-manager.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/clewdr-manager
+EnvironmentFile=/etc/clewdr-manager.env
+ExecStart=/var/lib/webcc-cluster/venv/bin/python -m network_mcp
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/clewdr-manager
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

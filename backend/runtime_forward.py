@@ -60,3 +60,51 @@ def infer(manager, owner, params, mode=None, deadline=None, on_check=None):
         manager.background.enabled = False
         handler.connection.close()
         handler.peer.close()
+
+
+def infer_stream(manager, owner, params, deadline, on_check, emit):
+    """Forward genuine tool-adapter events while collecting the validated final message."""
+    from native_events import NativeEvents
+    handler = CapturedHandler(manager, owner, {**params, 'stream': True}, None)
+    handler.outer_deadline = deadline
+    collector = NativeEvents(manager, owner)
+    buffer = bytearray()
+    status = [200]
+    handler.send_response = lambda value: status.__setitem__(0, value)
+    handler.send_header = lambda *args: None
+    handler.end_headers = lambda: None
+    original = handler.check_caller
+    def active():
+        original()
+        on_check()
+    handler.check_caller = active
+    def write(raw):
+        if raw == b'0\r\n\r\n':
+            return
+        head, data = raw.split(b'\r\n', 1)
+        buffer.extend(data[:int(head, 16)])
+        while b'\n\n' in buffer:
+            frame, remainder = bytes(buffer).split(b'\n\n', 1)
+            buffer[:] = remainder
+            for line in frame.splitlines():
+                if not line.startswith(b'data: '):
+                    continue
+                value = json.loads(line[6:])
+                if value.get('type') == 'error':
+                    raise FileProblem(502, value['error'].get('message', 'Model stream failed'))
+                collector.collect(value)
+                emit(value)
+    handler.write_stream = write
+    try:
+        handler.forward()
+        if handler.response:
+            code, response = handler.response
+            raise FileProblem(code if code != 200 else 502, response.get('error', {}).get('message', 'Expected model stream'))
+        if status[0] != 200 or not collector.finished:
+            raise FileProblem(502, 'Model stream did not complete')
+        return collector.result
+    except Problem as error:
+        raise FileProblem(error.status, str(error)) from None
+    finally:
+        handler.connection.close()
+        handler.peer.close()

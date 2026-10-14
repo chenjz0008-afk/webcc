@@ -865,6 +865,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('X-WebCC-Upstream-Model', self.model_metadata['upstream'])
             if getattr(self, "retry_after", None) is not None:
                 self.send_header("Retry-After", str(self.retry_after))
+            if getattr(self, 'should_retry', None) is False:
+                self.send_header('x-should-retry', 'false')
             if getattr(self, "request_id", None):
                 self.send_header("X-Request-Id", self.request_id)
                 self.send_header("Request-Id", self.request_id)
@@ -911,6 +913,29 @@ class Handler(BaseHTTPRequestHandler):
         if len(body) != length:
             raise Problem(400, "请求体不完整")
         return body
+
+    def end_headers(self):
+        from client_protocol import public
+        if self.headers.get('Origin') and public(self.path):
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Expose-Headers', 'Request-Id, X-Request-Id, Retry-After, X-WebCC-Adapter, X-WebCC-Upstream-Model, X-Should-Retry')
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        from client_protocol import HEADERS, public
+        requested = {v.strip().lower() for v in self.headers.get('Access-Control-Request-Headers', '').split(',') if v.strip()}
+        if not public(self.path):
+            self.send_error(404)
+            return
+        if self.headers.get('Access-Control-Request-Method') not in {'GET', 'POST', 'DELETE'} or not requested <= HEADERS:
+            self.send_error(400)
+            return
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
+        self.send_header('Access-Control-Allow-Headers', ', '.join(sorted(HEADERS)))
+        self.send_header('Access-Control-Max-Age', '600')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def do_GET(self):
         self.handle_request()
@@ -988,6 +1013,9 @@ class Handler(BaseHTTPRequestHandler):
             elif route == '/v1/tools/search' and self.command == 'POST':
                 from web_tools.discovery import route as tool_search_route
                 tool_search_route(self)
+            elif route in {'/v1/network/search', '/v1/network/fetch'} and self.command == 'POST':
+                from network_tools import route as network_route
+                network_route(self, route)
             elif route.startswith('/v1/mcp/'):
                 from mcp_connector import route as mcp_route
                 mcp_route(self, target)
@@ -1059,16 +1087,23 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, RecursionError):
                 payload = None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                from auxiliary_requests import is_classifier, prepare as prepare_classifier
+                from auxiliary_requests import is_classifier, full_review, prepare as prepare_classifier
                 self.classifier_request = is_classifier(payload)
+                self.request_shape = {'max_tokens': payload.get('max_tokens') if type(payload.get('max_tokens')) is int else None, 'stream': bool(payload.get('stream')),
+                                      'thinking_disabled': payload.get('thinking') == {'type': 'disabled'},
+                                      'classifier': self.classifier_request}
                 self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
                 if self.classifier_request:
+                    self.classifier_full = full_review(payload)
+                    self.classifier_delimiter = (payload.get('stop_sequences') or ['</block>'])[0]
                     payload = prepare_classifier(payload)
                     body = json.dumps(payload, ensure_ascii=False).encode()
                 from history_state import verify
                 verify(self.manager, self.caller_key or 'platform', payload)
                 from native_events import restore
                 restore(self.manager, self.caller_key or 'platform', payload)
+                from search_domains import SearchDomains
+                self.search_policy = SearchDomains.prepare(payload)
                 from messages_api import dispatch
                 if self.manager.web_tools_enabled and payload.get('model') != 'webcc-prompt-v1' and dispatch(self, payload):
                     return
@@ -1083,6 +1118,11 @@ class Handler(BaseHTTPRequestHandler):
                 from openai_tools import forward
                 forward(self, payload)
                 return
+            if urlsplit(self.path).path == '/v1/chat/completions' and self.manager.web_tools_enabled and isinstance(payload, dict):
+                from openai_tools import text_only, forward_plain
+                if text_only(payload):
+                    forward_plain(self, payload)
+                    return
             if (urlsplit(self.path).path == '/v1/messages' and self.manager.web_tools_enabled and
                     isinstance(tools, list) and tools and all(isinstance(t, dict) and 'input_schema' in t for t in tools) and not reserved_model):
                 from web_tools.gateway import forward
@@ -1112,7 +1152,7 @@ class Handler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex
         self.request_deadline = time.monotonic() + self.manager.request_seconds
         if self.classifier_request:
-            self.request_deadline = min(self.request_deadline, time.monotonic() + 30)
+            self.request_deadline = min(self.request_deadline, time.monotonic() + (45 if getattr(self, 'classifier_full', False) else 30))
         attempted = set()
         failure = None
         for _ in range(1 if self.classifier_request else self.manager.retry_attempts):
@@ -1135,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
                               "account_id": account["id"], "attempt": len(attempted),
                               "status": failure[0], "reason": failure[1]}), flush=True)
         status, message = failure
-        self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": status in {429, 502, 503, 504} or status >= 500}})
+        self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": getattr(self, 'should_retry', True) and (status in {429, 502, 503, 504} or status >= 500)}})
 
     def forward_attempt(self, account, body):
         try:
@@ -1188,6 +1228,9 @@ class Handler(BaseHTTPRequestHandler):
                 data = b"".join(chunks)
                 if len(data) > 32 * 1024 * 1024:
                     return 502, "上游响应超出大小限制"
+                if self.command == 'GET' and urlsplit(self.path).path in GET_ROUTES:
+                    from client_protocol import catalogue
+                    data = json.dumps(catalogue(json.loads(data)), ensure_ascii=False).encode()
                 if self.command == "POST" and self.path.endswith("/chat/completions"):
                     try:
                         payload = json.loads(data)
@@ -1213,14 +1256,21 @@ class Handler(BaseHTTPRequestHandler):
                         return 502, "上游未返回有效正文"
                 if getattr(self, 'native_adapter', False) and not getattr(self, 'include_thinking', True):
                     payload = json.loads(data)
+                    original_blocks = payload.get('content', [])
                     payload['content'] = [b for b in payload.get('content', []) if b.get('type') not in {'thinking', 'redacted_thinking'}]
                     if not payload['content'] and payload.get('stop_reason') != 'refusal':
-                        return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
+                        if self.classifier_request:
+                            self.should_retry = False
+                        return self.empty_native(payload, original_blocks)
                     if self.classifier_request:
                         from auxiliary_requests import validate
                         try:
-                            validate(payload)
+                            validate(payload, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                         except ValueError:
+                            self.should_retry = False
+                            from auxiliary_requests import diagnostics
+                            print(json.dumps({'event':'classifier_invalid','request_id':self.request_id,
+                                              'full_review':getattr(self,'classifier_full',False),**diagnostics(payload)}),flush=True)
                             return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                     data = json.dumps(payload, ensure_ascii=False).encode()
                 try:
@@ -1307,10 +1357,21 @@ class Handler(BaseHTTPRequestHandler):
             if not sent:
                 return status, "账号通道连接或读取异常"
             self.close_connection = True
+    def empty_native(self, message, blocks=None):
+        blocks = message.get('content', []) if blocks is None else blocks
+        print(json.dumps({'event': 'native_empty', 'request_id': self.request_id,
+                          **getattr(self, 'request_shape', {}),
+                          'stop_reason': message.get('stop_reason'),
+                          'block_types': [b.get('type') for b in blocks],
+                          'thinking_characters': sum(len(b.get('thinking', '')) for b in blocks if b.get('type') == 'thinking'),
+                          'output_tokens': message.get('usage', {}).get('output_tokens')}), flush=True)
+        return 502, '上游未返回可用正文'
+
     def forward_native(self, account, response, connection):
         from native_events import NativeEvents
         from message_stream import Stream
-        adapter = NativeEvents(self.manager, self.caller_key or 'platform', thinking=getattr(self, 'include_thinking', True))
+        adapter = NativeEvents(self.manager, self.caller_key or 'platform', thinking=getattr(self, 'include_thinking', True),
+                               search_policy=getattr(self, 'search_policy', None))
         state, visible, pending, size = StreamState(), StreamState(), [], 0
         self.adapter = 'webcc-native-v1'
         output = Stream(self)
@@ -1341,15 +1402,21 @@ class Handler(BaseHTTPRequestHandler):
             if state.failed or not adapter.finished or not state.meaningful and adapter.result.get('stop_reason') not in {'refusal', 'max_tokens'}:
                 raise http.client.HTTPException('Incomplete native Messages stream')
             if not visible.meaningful and adapter.result.get('stop_reason') != 'refusal':
-                return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
+                if self.classifier_request:
+                    self.should_retry = False
+                return self.empty_native(adapter.result, list(adapter.blocks.values()))
             if self.native_stream_requested:
                 self.write_stream(b'0\r\n\r\n')
             else:
                 if self.classifier_request:
                     from auxiliary_requests import validate
                     try:
-                        validate(adapter.result)
+                        validate(adapter.result, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                     except ValueError:
+                        self.should_retry = False
+                        from auxiliary_requests import diagnostics
+                        print(json.dumps({'event':'classifier_invalid','request_id':self.request_id,
+                                          'full_review':getattr(self,'classifier_full',False),**diagnostics(adapter.result)}),flush=True)
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
                 self.respond(200, adapter.result)

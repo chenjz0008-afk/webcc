@@ -147,3 +147,32 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 Claude Code 分析仓库的算法。
 
 原版 ClewdR 的[请求转换](https://github.com/Xerxes-2/clewdr/blob/master/src/claude_web_state/transform.rs)按全局 `web_search` 配置声明网页搜索，当前代码未显示逐请求关闭接口。本次只读核查，没有修改 ClewdR。未知网页工具继续保留防重放边界，JSON 和 SSE 采用相同规则。
+
+## 2026-10-14：Brave 与受控客户端网络
+
+复用 Brave 官方 Web Search 接口（固定 HTTPS 地址、私有 X-Subscription-Token、extra_snippets、site 查询约束），并再次校验实际来源。参考 Sub2API 的小型 provider 封装，所有入口共用 provider、代理、缓存和限速，不增加搜索微服务或模型转发协议。明确的 Claude Code 搜索子请求直接读取实际来源，普通问题保留模型规划和结果回传。
+
+MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只读工具注解；身份使用现有 APIKeys，ContextVar 隔离并发请求。curl 复用 Ubuntu Tinyproxy 1.11.1、APT 元数据 SHA256 校验和现有 Docker 出口白名单。既有 E2B/MCP 任务分派优先，避免新搜索入口覆盖执行器。
+
+依据：[Brave 参数](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[Claude Code 网络沙箱](https://code.claude.com/docs/en/sandboxing)、[Tinyproxy 配置](https://github.com/tinyproxy/tinyproxy/blob/master/docs/man5/tinyproxy.conf.txt.in)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)、[curl 官方镜像](https://github.com/curl/curl-container)。客户端代理变量可被 curl 参数绕过，因此受控测试还使用内部 Docker 网络；不能仅凭设置环境变量宣称阻止直连。
+
+
+## 2026-10-14 · 真实客户端深测与统一流式协议
+
+- [官方 Messages 流式协议](https://platform.claude.com/docs/en/build-with-claude/streaming)规定开始、内容块增量、停止原因及 message_stop。普通文本 Chat Completions 复用已验证的 Messages 转发和 ChatResponse 转换；不在上游断流时补造成功结束，不为普通问题增加工具规划调用。图片等尚未转换的输入继续走原路径。
+- [LiteLLM Anthropic 转换实现](https://github.com/BerriAI/litellm/blob/main/litellm/llms/anthropic/chat/transformation.py)采用协议转换和停止原因映射。这里复用已有薄适配器，保留实际模型字段；真实思考以 reasoning_content 扩展返回，不冒充正文。验收使用官方 SDK 严格校验和最终消息聚合，不能仅检查 curl 收到文字。
+- 用户提供的 [StreamingToolExecutor.ts](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts)区分排队、执行、交付，按调用 ID 回传真实结果；进度及时输出，取消和失败不能重放已执行副作用。这是公开分析仓库，不据此断言 Anthropic 服务端的实现。继续沿用 WebCC 已有校验、租约和客户端执行边界，不复制另一套执行器。
+- [Claude Code auto mode 配置](https://code.claude.com/docs/en/auto-mode-config)允许补充实际容器隔离、公开仓库及人工测试夹具的来源。服务器隔离测试保留默认规则，只补充准确环境描述；真实拒绝、无可用判定和协议错误分别记录，不强制返回允许，也不修改用户 Mac 的权限配置。
+
+响应速度分别记录首段正文、单次模型调用与整项任务耗时。SDK 协议通过、文件真正保存、任务结果准确和客户端实际执行是不同验收项；营销草稿的无依据性能描述仍按内容异常记录。原始输入输出及令牌记录仅保存在仓库外。
+
+实际深测进一步发现：新版 Claude Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
+
+完整审批的复测仍有空拒答，不能只凭识别正确宣称自动模式恢复。格式适配保留完整安全规则与历史，仅将末尾请求私有推理的输出指令改为最终判定和规则要求的简短理由。返回结果仍做相同校验；协议缺失不重写为允许。补充只含停止原因、长度和标签的脱敏诊断，并对无完整判定的响应设置 x-should-retry: false，依据 [官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/_base_client.py)与 [TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript/blob/main/src/client.ts) 的重试实现，避免重复消费审批请求造成长时间无可见进度。瞬时上游故障的既有重试不受此规则影响。
+## 2026-10-14 · Chatbox 接入与空回复定位
+
+核对 [Chatbox Claude provider](https://github.com/chatboxai/chatbox/blob/main/src/shared/providers/definitions/models/claude.ts) 和 [地址规范化](https://github.com/chatboxai/chatbox/blob/main/src/shared/utils/llm_utils.ts)：自定义 Claude Host 不自动添加 `/v1`；目录筛选 `type=model`。WebCC 在上游目录上补 Anthropic 字段，保留 OpenAI 字段，不将目录名称当作精确模型资格。未知发布时间使用 epoch，符合 [官方 Models 协议](https://platform.claude.com/docs/en/api/models/list)。此次未新增完整目录分页实现。
+
+浏览器协议依据 [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)：仅公开 `/v1/` 和 `/code/v1/` API 返回跨域头，预检限制方法与请求头；不开放管理接口，不允许 cookie 凭据。实际请求仍验证用户密钥与权限；预检不分配账号、不调用上游。响应头在统一出口添加，涵盖错误与 SSE，不引入额外服务。
+
+真实 CLI 合成天气搜索和只读计算的三次快速审批都被正确识别，均返回有效判断。历史截图时段仍有空正文与无会话异常，现有日志不足以将它们与具体审批请求关联。补充结构诊断记录请求上限、Thinking 开关、审批识别、实际停止原因、内容块类型及字符长度，不记录正文、签名、用户路径或密钥；移除未证实的“可能达到输出限制”错误描述。
