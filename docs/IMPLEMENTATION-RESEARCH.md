@@ -169,3 +169,10 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 实际深测进一步发现：新版 Claude Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
 
 完整审批的复测仍有空拒答，不能只凭识别正确宣称自动模式恢复。格式适配保留完整安全规则与历史，仅将末尾请求私有推理的输出指令改为最终判定和规则要求的简短理由。返回结果仍做相同校验；协议缺失不重写为允许。补充只含停止原因、长度和标签的脱敏诊断，并对无完整判定的响应设置 x-should-retry: false，依据 [官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/_base_client.py)与 [TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript/blob/main/src/client.ts) 的重试实现，避免重复消费审批请求造成长时间无可见进度。瞬时上游故障的既有重试不受此规则影响。
+## 2026-10-14 · Chatbox 接入与空回复定位
+
+核对 [Chatbox Claude provider](https://github.com/chatboxai/chatbox/blob/main/src/shared/providers/definitions/models/claude.ts) 和 [地址规范化](https://github.com/chatboxai/chatbox/blob/main/src/shared/utils/llm_utils.ts)：自定义 Claude Host 不自动添加 `/v1`；目录筛选 `type=model`。WebCC 在上游目录上补 Anthropic 字段，保留 OpenAI 字段，不将目录名称当作精确模型资格。未知发布时间使用 epoch，符合 [官方 Models 协议](https://platform.claude.com/docs/en/api/models/list)。此次未新增完整目录分页实现。
+
+浏览器协议依据 [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)：仅公开 `/v1/` 和 `/code/v1/` API 返回跨域头，预检限制方法与请求头；不开放管理接口，不允许 cookie 凭据。实际请求仍验证用户密钥与权限；预检不分配账号、不调用上游。响应头在统一出口添加，涵盖错误与 SSE，不引入额外服务。
+
+真实 CLI 合成天气搜索和只读计算的三次快速审批都被正确识别，均返回有效判断。历史截图时段仍有空正文与无会话异常，现有日志不足以将它们与具体审批请求关联。补充结构诊断记录请求上限、Thinking 开关、审批识别、实际停止原因、内容块类型及字符长度，不记录正文、签名、用户路径或密钥；移除未证实的“可能达到输出限制”错误描述。
