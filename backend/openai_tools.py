@@ -117,6 +117,8 @@ class ChatResponse:
                     'type': 'function', 'function': {'name': block['name'], 'arguments': ''}}]})]
         if kind == 'content_block_delta':
             delta = value['delta']
+            if delta['type'] == 'thinking_delta':
+                return [self.payload({'reasoning_content': delta['thinking']})]
             if delta['type'] == 'text_delta':
                 return [self.payload({'content': delta['text']})]
             if delta['type'] == 'input_json_delta':
@@ -147,16 +149,19 @@ class ChatResponse:
         return b''.join(output)
 
     def message(self, value):
-        content, calls = [], []
+        content, calls, reasoning = [], [], []
         for block in value['content']:
             if block['type'] == 'text':
                 content.append(block['text'])
+            elif block['type'] == 'thinking':
+                reasoning.append(block['thinking'])
             elif block['type'] == 'tool_use':
                 calls.append({'id': block['id'], 'type': 'function', 'function': {
                     'name': block['name'], 'arguments': json.dumps(block['input'], ensure_ascii=False)}})
         return {'id': self.id, 'created': self.created, 'model': value['model'], 'object': 'chat.completion',
                 'choices': [{'index': 0, 'finish_reason': finish_reason(value['stop_reason']), 'message': {
                     'role': 'assistant', 'content': ''.join(content) or (None if calls else ''),
+                    **({'reasoning_content': ''.join(reasoning)} if reasoning else {}),
                     **({'tool_calls': calls} if calls else {})}}], 'usage': usage(value.get('usage', {}))}
 
 
@@ -216,3 +221,56 @@ def forward(handler, fields):
         handler.close_connection = True
         handler.respond(error.status if isinstance(error, FileProblem) else 400,
                         {'error': {'type': 'invalid_request_error', 'message': str(error) if isinstance(error, FileProblem) else 'Invalid Chat tool request'}})
+
+
+def text_only(fields):
+    messages = fields.get('messages')
+    return isinstance(messages, list) and all(isinstance(m, dict) and
+        (m.get('content') is None or isinstance(m.get('content'), str) or
+         isinstance(m.get('content'), list) and all(isinstance(b, dict) and b.get('type') == 'text'
+                                                   for b in m['content'])) for m in messages)
+
+
+def forward_plain(handler, fields):
+    """Use the native event lifecycle without adding the tool planning prompt."""
+    from runtime_forward import CapturedHandler
+    from node_transport import semantic_headers
+    from manager import ClientGone
+    import select
+    import socket
+    params = convert(fields)
+    if params['tool_choice']['type'] not in {'auto', 'none'}:
+        raise FileProblem(400, 'tool_choice requires declared tools')
+    params.pop('tools')
+    params.pop('tool_choice')
+    proxy = Handler(handler, fields)
+    captured = CapturedHandler(handler.manager, handler.caller_key or 'platform', params, None)
+    captured.path = proxy.path
+    captured.headers.update(semantic_headers(handler.headers))
+    def sync():
+        for name in ('request_id', 'adapter', 'retry_after', 'close_connection'):
+            if name in captured.__dict__:
+                setattr(proxy, name, getattr(captured, name))
+                setattr(handler, name, getattr(captured, name))
+    def active():
+        handler.check_caller()
+        if select.select([handler.connection], [], [], 0)[0] and not handler.connection.recv(1, socket.MSG_PEEK):
+            raise ClientGone()
+    def respond(status, value, content_type=None):
+        sync()
+        proxy.respond(status, json.loads(value) if isinstance(value, bytes) else value)
+    def send_response(*args):
+        sync()
+        proxy.send_response(*args)
+    captured.check_caller = active
+    captured.respond = respond
+    captured.send_response = send_response
+    captured.send_header = handler.send_header
+    captured.end_headers = handler.end_headers
+    captured.write_stream = proxy.write_stream
+    try:
+        captured.forward()
+    finally:
+        sync()
+        captured.connection.close()
+        captured.peer.close()

@@ -14,6 +14,12 @@ def review():
         'stop_sequences':['</severity>'],'messages':[{'role':'user','content':'Review a read-only operation'}]}
 
 
+def full_review_request():
+    fields=review();fields.pop('stop_sequences');fields['max_tokens']=8192
+    fields['messages']=[{'role':'user','content':'<transcript>synthetic action</transcript>\nReview the classification process and follow it carefully. Use <thinking> before responding with <block>.'}]
+    return fields
+
+
 def stream(blocks, reason='end_turn'):
     values=[{'type':'message_start','message':{'id':'msg_fixture','type':'message','role':'assistant','model':'fixture',
         'content':[],'usage':{'input_tokens':10,'output_tokens':0}}}]
@@ -28,6 +34,19 @@ def stream(blocks, reason='end_turn'):
 
 
 class ReviewTests(unittest.TestCase):
+    def test_full_review_recognition_and_verdicts_preserve_policy(self):
+        fields=full_review_request();self.assertTrue(is_classifier(fields))
+        self.assertEqual(prepare(fields)['max_tokens'],8192)
+        for changes in ({'messages':[{'role':'user','content':'ordinary question'}]},
+                        {'system':'You are helpful'},{'stream':True},{'thinking':{'type':'adaptive'}}):
+            self.assertFalse(is_classifier({**fields,**changes}))
+        for text in ('<thinking>Synthetic review.</thinking><block>no</block>',
+                     '<block>yes</block><category>Data Exfiltration</category><reason>[Data Exfiltration] Sends private material.</reason>'):
+            message={'content':[{'type':'text','text':text}],'stop_reason':'end_turn'}
+            original=copy.deepcopy(message);validate(message,'</block>',True);self.assertEqual(message,original)
+        for text in ('<block>yes</block>','<thinking>truncated','<block>no</block> garbage'):
+            with self.assertRaises(ValueError):validate({'content':[{'type':'text','text':text}],'stop_reason':'end_turn'},'</block>',True)
+        with self.assertRaises(ValueError):validate({'content':[],'stop_reason':'refusal'},'</block>',True)
     def test_classifier_recognition_requires_the_complete_protocol(self):
         fields=review();self.assertTrue(is_classifier(fields))
         for changes in ({'max_tokens':2048},{'thinking':{'type':'adaptive'}},{'stop_sequences':['STOP']},
@@ -84,6 +103,65 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def reply(self, blocks, reason='end_turn'):
         key='Bearer '+self.manager.get_account(self.identity)['key']
         base.Worker.replies[key]=(200,stream(blocks,reason),'text/event-stream')
+
+    def test_full_review_uses_existing_classifier_profile_and_preserves_verdict(self):
+        for text in ('<thinking>Synthetic review</thinking><block>no</block>',
+                     '<block>yes</block><category>Data Exfiltration</category><reason>[Data Exfiltration] Sends private data.</reason>'):
+            self.reply([{'type':'text','text':text}])
+            with patch.object(self.manager,'worker_connection',wraps=self.manager.worker_connection) as connection:
+                self.manager.worker_profiles_enabled=True
+                status,_,raw=self.request('POST','/v1/messages',full_review_request())
+                self.assertEqual(connection.call_args.kwargs['profile'],'client-tools')
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(raw)['content'][0]['text'],text)
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],8192)
+            self.assert_idle()
+
+    def test_plain_chat_stream_and_completion_share_the_native_lifecycle(self):
+        self.manager.web_tools_enabled=True
+        for requested in (False,True):
+            self.reply([{'type':'text','text':'Useful answer'}],reason='max_tokens')
+            status,_,raw=self.request('POST','/v1/chat/completions?trace=one',self.payload(requested))
+            self.assertEqual(status,200)
+            self.assertEqual(base.Worker.seen[-1]['path'],'/v1/messages?trace=one')
+            upstream=json.loads(base.Worker.seen[-1]['body'])
+            self.assertNotIn('tools',upstream)
+            self.assertNotIn('tool_choice',upstream)
+            if requested:
+                packets=[line[6:] for line in raw.splitlines() if line.startswith(b'data: ')]
+                self.assertEqual(packets[-1],b'[DONE]')
+                values=[json.loads(p) for p in packets[:-1]]
+                for value in values:
+                    self.assertTrue(value['id']);self.assertEqual(value['model'],'fixture')
+                    self.assertEqual(value['object'],'chat.completion.chunk')
+                    self.assertEqual(value['choices'][0]['index'],0)
+                self.assertEqual(values[-1]['choices'][0]['finish_reason'],'length')
+                self.assertEqual(''.join(v['choices'][0]['delta'].get('content','') for v in values),'Useful answer')
+            else:
+                value=json.loads(raw)
+                self.assertEqual(value['model'],'fixture')
+                self.assertEqual(value['choices'][0]['finish_reason'],'length')
+                self.assertEqual(value['choices'][0]['message']['content'],'Useful answer')
+            self.assert_idle()
+
+    def test_plain_chat_empty_hidden_thinking_remains_an_error(self):
+        self.manager.web_tools_enabled=True
+        self.reply([{'type':'thinking','thinking':'Synthetic reasoning'}],reason='max_tokens')
+        status,_,raw=self.request('POST','/v1/chat/completions',{**self.payload(True),'thinking':{'type':'disabled'}})
+        self.assertEqual(status,502)
+        self.assertNotIn(b'[DONE]',raw)
+        self.assertEqual(self.manager.get_account(self.identity).get('consecutive_failures',0),0)
+        self.assert_idle()
+
+    def test_plain_chat_preserves_real_reasoning_as_an_extension(self):
+        self.manager.web_tools_enabled=True
+        self.reply([{'type':'thinking','thinking':'Synthetic reasoning'},{'type':'text','text':'Answer'}])
+        status,_,raw=self.request('POST','/v1/chat/completions',self.payload())
+        self.assertEqual(status,200)
+        message=json.loads(raw)['choices'][0]['message']
+        self.assertEqual(message['content'],'Answer')
+        self.assertEqual(message['reasoning_content'],'Synthetic reasoning')
+        self.assert_idle()
 
     def test_disabled_thinking_renumbers_visible_stream_blocks(self):
         blocks=[{'type':'thinking','thinking':'Synthetic private reasoning'}, {'type':'text','text':'Useful answer'}]

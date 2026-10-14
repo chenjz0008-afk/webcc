@@ -1062,11 +1062,12 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, RecursionError):
                 payload = None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                from auxiliary_requests import is_classifier, prepare as prepare_classifier
+                from auxiliary_requests import is_classifier, full_review, prepare as prepare_classifier
                 self.classifier_request = is_classifier(payload)
                 self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
                 if self.classifier_request:
-                    self.classifier_delimiter = payload['stop_sequences'][0]
+                    self.classifier_full = full_review(payload)
+                    self.classifier_delimiter = (payload.get('stop_sequences') or ['</block>'])[0]
                     payload = prepare_classifier(payload)
                     body = json.dumps(payload, ensure_ascii=False).encode()
                 from history_state import verify
@@ -1089,6 +1090,11 @@ class Handler(BaseHTTPRequestHandler):
                 from openai_tools import forward
                 forward(self, payload)
                 return
+            if urlsplit(self.path).path == '/v1/chat/completions' and self.manager.web_tools_enabled and isinstance(payload, dict):
+                from openai_tools import text_only, forward_plain
+                if text_only(payload):
+                    forward_plain(self, payload)
+                    return
             if (urlsplit(self.path).path == '/v1/messages' and self.manager.web_tools_enabled and
                     isinstance(tools, list) and tools and all(isinstance(t, dict) and 'input_schema' in t for t in tools) and not reserved_model):
                 from web_tools.gateway import forward
@@ -1118,7 +1124,7 @@ class Handler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex
         self.request_deadline = time.monotonic() + self.manager.request_seconds
         if self.classifier_request:
-            self.request_deadline = min(self.request_deadline, time.monotonic() + 30)
+            self.request_deadline = min(self.request_deadline, time.monotonic() + (45 if getattr(self, 'classifier_full', False) else 30))
         attempted = set()
         failure = None
         for _ in range(1 if self.classifier_request else self.manager.retry_attempts):
@@ -1225,7 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
                     if self.classifier_request:
                         from auxiliary_requests import validate
                         try:
-                            validate(payload, self.classifier_delimiter)
+                            validate(payload, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                         except ValueError:
                             return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                     data = json.dumps(payload, ensure_ascii=False).encode()
@@ -1355,7 +1361,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.classifier_request:
                     from auxiliary_requests import validate
                     try:
-                        validate(adapter.result, self.classifier_delimiter)
+                        validate(adapter.result, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                     except ValueError:
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}

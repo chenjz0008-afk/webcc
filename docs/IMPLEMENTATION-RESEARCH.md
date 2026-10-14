@@ -155,3 +155,15 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只读工具注解；身份使用现有 APIKeys，ContextVar 隔离并发请求。curl 复用 Ubuntu Tinyproxy 1.11.1、APT 元数据 SHA256 校验和现有 Docker 出口白名单。既有 E2B/MCP 任务分派优先，避免新搜索入口覆盖执行器。
 
 依据：[Brave 参数](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[Claude Code 网络沙箱](https://code.claude.com/docs/en/sandboxing)、[Tinyproxy 配置](https://github.com/tinyproxy/tinyproxy/blob/master/docs/man5/tinyproxy.conf.txt.in)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)、[curl 官方镜像](https://github.com/curl/curl-container)。客户端代理变量可被 curl 参数绕过，因此受控测试还使用内部 Docker 网络；不能仅凭设置环境变量宣称阻止直连。
+
+
+## 2026-10-14 · 真实客户端深测与统一流式协议
+
+- [官方 Messages 流式协议](https://platform.claude.com/docs/en/build-with-claude/streaming)规定开始、内容块增量、停止原因及 message_stop。普通文本 Chat Completions 复用已验证的 Messages 转发和 ChatResponse 转换；不在上游断流时补造成功结束，不为普通问题增加工具规划调用。图片等尚未转换的输入继续走原路径。
+- [LiteLLM Anthropic 转换实现](https://github.com/BerriAI/litellm/blob/main/litellm/llms/anthropic/chat/transformation.py)采用协议转换和停止原因映射。这里复用已有薄适配器，保留实际模型字段；真实思考以 reasoning_content 扩展返回，不冒充正文。验收使用官方 SDK 严格校验和最终消息聚合，不能仅检查 curl 收到文字。
+- 用户提供的 [StreamingToolExecutor.ts](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts)区分排队、执行、交付，按调用 ID 回传真实结果；进度及时输出，取消和失败不能重放已执行副作用。这是公开分析仓库，不据此断言 Anthropic 服务端的实现。继续沿用 WebCC 已有校验、租约和客户端执行边界，不复制另一套执行器。
+- [Claude Code auto mode 配置](https://code.claude.com/docs/en/auto-mode-config)允许补充实际容器隔离、公开仓库及人工测试夹具的来源。服务器隔离测试保留默认规则，只补充准确环境描述；真实拒绝、无可用判定和协议错误分别记录，不强制返回允许，也不修改用户 Mac 的权限配置。
+
+响应速度分别记录首段正文、单次模型调用与整项任务耗时。SDK 协议通过、文件真正保存、任务结果准确和客户端实际执行是不同验收项；营销草稿的无依据性能描述仍按内容异常记录。原始输入输出及令牌记录仅保存在仓库外。
+
+实际深测进一步发现：新版 Claude Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
