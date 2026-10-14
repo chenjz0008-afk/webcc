@@ -22,7 +22,7 @@ def catalogue(data):
     for item in data['data']:
         stamp = item.get('created', 0)
         stamp = stamp if isinstance(stamp, (int, float)) and 0 <= stamp <= 253402300799 else 0
-        models.append({**item, 'type': 'model', 'display_name': item.get('display_name') or item['id'],
+        models.append({**item, 'type': 'model', 'lifecycle': item.get('lifecycle', 'active'), 'display_name': item.get('display_name') or item['id'],
                        'created_at': item.get('created_at') or datetime.fromtimestamp(stamp, timezone.utc).isoformat()})
     result.update(data=models, first_id=models[0]['id'] if models else None,
                   last_id=models[-1]['id'] if models else None)

@@ -18,6 +18,8 @@ class PublicClients(unittest.TestCase):
         self.assertEqual(value['data'][0]['type'], 'model')
         self.assertEqual(value['data'][0]['display_name'], 'claude-sonnet-4-6')
         self.assertEqual(value['data'][0]['created_at'], '1970-01-01T00:00:00+00:00')
+        from anthropic.types import ModelInfo
+        self.assertEqual(ModelInfo.model_validate(value['data'][0]).lifecycle, 'active')
         original = {'object': 'list', 'data': [{'id': 'fixture', 'object': 'model', 'created': 0}]}
         self.assertEqual(catalogue(original)['data'][0]['object'], 'model')
         self.assertEqual(original['data'][0], {'id': 'fixture', 'object': 'model', 'created': 0})
