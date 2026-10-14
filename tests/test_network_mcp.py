@@ -36,3 +36,11 @@ class MCPNetworkTests(unittest.IsolatedAsyncioTestCase):
                 await network_mcp.Authentication(app)({'type': 'http', 'headers': headers}, None, send)
                 self.assertEqual(packets[0]['status'], code)
         self.assertFalse(executed)
+
+    async def test_nginx_host_without_port_is_accepted_but_rebinding_is_not(self):
+        from mcp.server.transport_security import TransportSecurityMiddleware
+        guard = TransportSecurityMiddleware(network_mcp.mcp.settings.transport_security)
+        self.assertTrue(guard._validate_host('165.154.205.213'))
+        self.assertTrue(guard._validate_host('165.154.205.213:443'))
+        self.assertFalse(guard._validate_host('attacker.example'))
+        self.assertFalse(guard._validate_host('165.154.205.213.attacker.example'))

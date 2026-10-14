@@ -8,6 +8,8 @@ WebCC 是一个用于管理多个 Claude 网页账号的后台和 API 网关。�
 
 持久批量任务、E2B 执行、Skills 与程序化工具调用见 [持久任务架构](docs/DURABLE-RUNTIME.md)，对外接口见 [API 文档](API-PUBLIC.md)。
 
+Brave、HTTP/MCP 搜索与服务器受控 curl 见 [客户端联网](docs/CLIENT-NETWORK.md)。
+
 完整工具流程的模块边界、网页内置能力和后续验收见 [工具能力架构](docs/TOOL-CAPABILITY-ARCHITECTURE.md)。
 
 ## 架构
@@ -28,6 +30,11 @@ docs/          架构、运维与验收说明
 flowchart TD
     Browser[管理页面 / API 调用者] --> Nginx[Nginx HTTPS :443]
     Nginx --> Manager[WebCC · 127.0.0.1:9000]
+    Nginx --> MCP[网络 MCP · 127.0.0.1:9002]
+    Manager --> Network[共享搜索与网页读取]
+    MCP --> Network
+    Network --> ToolProxy[指定工具代理]
+    ToolProxy --> Sources[Brave / 公开网页]
     Manager --> Store[PostgreSQL · 状态、密钥与文件]
     Manager --> Limits[Redis · 共享限流与有界等待队列]
     Manager --> WorkerA[官方 ClewdR · 账号 A]
@@ -49,6 +56,8 @@ flowchart TD
 | 部分 | 职责 |
 | --- | --- |
 | `backend/manager.py` | 账号和凭据、代理检查、容器启停、平台认证、并发、请求转发和异常处理 |
+| `backend/network_tools.py` / `network_messages.py` | 共用 Brave provider、缓存和限速；复用工具往返与实时文本输出 |
+| `backend/network_mcp.py` | 标准 MCP 搜索和读取，使用既有密钥认证与用户隔离 |
 | `backend/egress.py` | 账号容器代理出口白名单与启动前防火墙恢复 |
 | `backend/updater.py` | 检查 ClewdR 官方版本、候选容器验证、逐个更新和失败回退 |
 | `frontend/src/pages/` | 工作台、账号、资源、更新和 API 接入页面 |
@@ -69,14 +78,14 @@ flowchart TD
 | CPU | 2 个 vCPU |
 | 内存 | 约 2 GB，系统可见 1965 MiB |
 | 系统盘 | 约 58 GiB，导出时使用约 2.5 GiB |
-| Swap | 未配置 |
+| Swap | 2 GiB |
 | 管理页面 | https://165.154.205.213/ |
 | API Base URL | `https://165.154.205.213/v1` |
 | 后端监听 | `127.0.0.1:9000` |
 | 项目目录 | `/opt/clewdr-manager` |
 | 私有数据目录 | `/var/lib/clewdr-manager` |
 | 环境文件 | `/etc/clewdr-manager.env` |
-| systemd 服务 | `clewdr-manager.service` |
+| systemd 服务 | `clewdr-manager`、`webcc-runtime`、`webcc-network-mcp` |
 | HTTPS | Nginx，证书路径位于 `/etc/letsencrypt/live/165.154.205.213/` |
 | 当前 ClewdR 提交 | `061c6d8ac9187148f50c8d806b56962a7f222b6c` |
 | 当前镜像摘要 | `sha256:a598cc2954171913fe278ac6e4cedf8dfe6fe7a20437798362765676ed9e5813` |
