@@ -22,6 +22,10 @@ class ClusterState:
             db.execute('CREATE TABLE IF NOT EXISTS webcc_cluster_config (name text PRIMARY KEY, value integer NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS webcc_occupancy (account_id text PRIMARY KEY, token text NOT NULL UNIQUE, node_id text NOT NULL, started_at timestamptz NOT NULL DEFAULT now())')
             db.execute('ALTER TABLE webcc_occupancy ADD COLUMN IF NOT EXISTS agent_started boolean NOT NULL DEFAULT false')
+            db.execute("ALTER TABLE webcc_occupancy ADD COLUMN IF NOT EXISTS lease_kind text NOT NULL DEFAULT 'request'")
+            db.execute('ALTER TABLE webcc_occupancy ADD COLUMN IF NOT EXISTS owner_pid integer')
+            db.execute('ALTER TABLE webcc_occupancy ADD COLUMN IF NOT EXISTS owner_started_at timestamptz')
+        self.reap_prewarm()
         self.baseline = self.load()
 
     @staticmethod
@@ -95,9 +99,11 @@ class ClusterState:
                 db.execute('SELECT pg_advisory_unlock(hashtextextended(%s,0))', (name,))
                 db.commit()
 
-    def reserve(self, account_id, node_id, capacity, statuses=('ready',), background=False):
+    def reserve(self, account_id, node_id, capacity, statuses=('ready',), background=False, kind='request'):
         if not statuses or set(statuses) - {'ready', 'updating'}:
             raise ValueError('Unsupported reservation state')
+        if kind not in {'request', 'prewarm'}:
+            raise ValueError('Unsupported reservation kind')
         token = secrets.token_hex(24)
         with self.pool.connection() as db:
             db.execute("SELECT pg_advisory_xact_lock(hashtextextended('webcc:capacity',0))")
@@ -111,12 +117,17 @@ class ClusterState:
             limit = max(1, capacity - 1) if background else capacity
             if db.execute('SELECT count(*) FROM webcc_occupancy').fetchone()[0] >= limit:
                 return None
-            inserted = db.execute('INSERT INTO webcc_occupancy(account_id,token,node_id) VALUES (%s,%s,%s) ON CONFLICT(account_id) DO NOTHING RETURNING token', (account_id, token, node_id)).fetchone()
+            owner = db.execute('SELECT pid,backend_start FROM pg_stat_activity WHERE pid=pg_backend_pid()').fetchone() if kind == 'prewarm' else (None, None)
+            inserted = db.execute('INSERT INTO webcc_occupancy(account_id,token,node_id,lease_kind,owner_pid,owner_started_at) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(account_id) DO NOTHING RETURNING token', (account_id, token, node_id, kind, *owner)).fetchone()
             return inserted[0] if inserted else None
+
+    def reap_prewarm(self):
+        with self.pool.connection() as db:
+            return db.execute("DELETE FROM webcc_occupancy o WHERE lease_kind='prewarm' AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.pid=o.owner_pid AND (a.backend_start IS NULL OR a.backend_start=o.owner_started_at))").rowcount
 
     def claim(self, account_id, token):
         with self.pool.connection() as db:
-            return db.execute('UPDATE webcc_occupancy SET agent_started=true WHERE account_id=%s AND token=%s AND NOT agent_started RETURNING account_id', (account_id, token)).fetchone() is not None
+            return db.execute("UPDATE webcc_occupancy SET agent_started=true WHERE account_id=%s AND token=%s AND NOT agent_started AND lease_kind='request' RETURNING account_id", (account_id, token)).fetchone() is not None
 
     def release(self, account_id, token):
         with self.pool.connection() as db:

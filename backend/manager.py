@@ -205,6 +205,7 @@ class Manager:
         self.max_inflight, self.queue_size, self.queue_seconds = max_inflight, queue_size, queue_seconds
         self.web_tools_enabled = os.environ.get("MANAGER_WEB_TOOLS_ENABLED", "false").lower() == "true"
         self.worker_profiles_enabled = os.environ.get('MANAGER_WORKER_PROFILES_ENABLED', 'false').lower() == 'true'
+        self.worker_profile_warm = max(0, min(max_inflight, int(os.environ.get('MANAGER_WORKER_PROFILE_WARM', '2'))))
         if self.web_tools_enabled:
             import web_tools.api
         self.retry_attempts = max(1, min(5, int(os.environ.get("MANAGER_RETRY_ATTEMPTS", "3"))))
@@ -375,7 +376,7 @@ class Manager:
         self.docker("run", "-d", "--name", name or account["container"], "--restart", "unless-stopped",
                     *network,
                     "--label", "clewdr-manager=true", "--label", "account-id=" + account["id"],
-                    "--publish", "127.0.0.1:{}:8484".format(port or account["port"]),
+                    "--publish", "127.0.0.1:{}:8484".format('' if port == 0 else account['port'] if port is None else port),
                     "--mount", "type=bind,src={},dst=/etc/clewdr".format(directory or account["directory"]),
                     "--log-driver", "none", "--read-only", "--tmpfs", "/tmp:rw,nosuid,noexec,size=16m",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "0:0",
@@ -637,7 +638,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
-    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None):
+    def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None, record_dispatch=True):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -678,15 +679,17 @@ class Manager:
                     except Exception:
                         raise Problem(503, '中心等待队列不可用') from None
                     if first and available and self.total < capacity:
-                        from worker_profiles import warm
-                        rank = lambda item: (bool(profile) and not warm(item), self.last_used.get(item['id'], 0))
+                        from worker_profiles import ready_accounts
+                        ready = ready_accounts(self, available) if profile else set()
+                        rank = lambda item: (bool(profile) and item['id'] not in ready, self.last_used.get(item['id'], 0))
                         account = min(available, key=rank)
                         if self.cluster:
                             try:
                                 token = None
                                 for candidate in sorted(available, key=rank):
                                     token = self.cluster.reserve(candidate["id"], self.node_id, self.max_inflight, statuses,
-                                        background=getattr(self.background, 'enabled', False))
+                                        background=getattr(self.background, 'enabled', False),
+                                        **({'kind': 'prewarm'} if not record_dispatch else {}))
                                     if token:
                                         account = candidate
                                         break
@@ -699,9 +702,10 @@ class Manager:
                                 self.condition.wait(min(.1, remaining))
                                 continue
                             self.reservations[account["id"]] = token
-                        self.cursor += 1
-                        self.last_used[account["id"]] = self.cursor
-                        self.dispatches[account["id"]] = self.dispatches.get(account["id"], 0) + 1
+                        if record_dispatch:
+                            self.cursor += 1
+                            self.last_used[account["id"]] = self.cursor
+                            self.dispatches[account["id"]] = self.dispatches.get(account["id"], 0) + 1
                         self.inflight[account["id"]] = 1
                         self.total += 1
                         return account
@@ -1497,8 +1501,8 @@ def main():
     def maintenance():
         while True:
             try:
-                from worker_profiles import expire
-                expire(manager)
+                from worker_profiles import maintain
+                maintain(manager)
             except Exception as error:
                 print('worker_profile_cleanup_failed', type(error).__name__, flush=True)
             interval = max(60, int(os.environ.get("MANAGER_UPDATE_SECONDS", "86400")))

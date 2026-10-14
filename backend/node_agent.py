@@ -162,13 +162,32 @@ class NodeAgent:
     def app(self):
         @asynccontextmanager
         async def lifespan(app):
-            yield
-            if self.tasks:
-                done, pending = await asyncio.wait(self.tasks, timeout=self.manager.request_seconds)
-                for task in pending: task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-            await self.client.aclose()
-            self.manager.cluster.pool.close()
+            import threading
+            stopped, wake = threading.Event(), asyncio.Event()
+            async def profiles():
+                from worker_profiles import maintain
+                while not stopped.is_set():
+                    try:
+                        await asyncio.to_thread(maintain, self.manager, stopped)
+                    except Exception as error:
+                        print('worker_profile_maintenance_failed', type(error).__name__, flush=True)
+                    try:
+                        await asyncio.wait_for(wake.wait(), 60)
+                    except asyncio.TimeoutError:
+                        pass
+            maintenance = asyncio.create_task(profiles()) if getattr(self.manager, 'worker_profiles_enabled', False) else None
+            try:
+                yield
+            finally:
+                stopped.set(); wake.set()
+                if maintenance:
+                    await maintenance
+                if self.tasks:
+                    done, pending = await asyncio.wait(self.tasks, timeout=self.manager.request_seconds)
+                    for task in pending: task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                await self.client.aclose()
+                self.manager.cluster.pool.close()
         return Starlette(routes=[Route('/internal/forward', self.forward, methods=['GET', 'POST']),
                                  Route('/internal/health', self.health)], lifespan=lifespan)
 
