@@ -988,6 +988,9 @@ class Handler(BaseHTTPRequestHandler):
             elif route == '/v1/tools/search' and self.command == 'POST':
                 from web_tools.discovery import route as tool_search_route
                 tool_search_route(self)
+            elif route in {'/v1/network/search', '/v1/network/fetch'} and self.command == 'POST':
+                from network_tools import route as network_route
+                network_route(self, route)
             elif route.startswith('/v1/mcp/'):
                 from mcp_connector import route as mcp_route
                 mcp_route(self, target)

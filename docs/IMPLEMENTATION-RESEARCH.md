@@ -147,3 +147,11 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 Claude Code 分析仓库的算法。
 
 原版 ClewdR 的[请求转换](https://github.com/Xerxes-2/clewdr/blob/master/src/claude_web_state/transform.rs)按全局 `web_search` 配置声明网页搜索，当前代码未显示逐请求关闭接口。本次只读核查，没有修改 ClewdR。未知网页工具继续保留防重放边界，JSON 和 SSE 采用相同规则。
+
+## 2026-10-14：Brave 与受控客户端网络
+
+复用 Brave 官方 Web Search 接口（固定 HTTPS 地址、私有 X-Subscription-Token、extra_snippets、site 查询约束），并再次校验实际来源。参考 Sub2API 的小型 provider 封装，所有入口共用 provider、代理、缓存和限速，不增加搜索微服务或模型转发协议。明确的 Claude Code 搜索子请求直接读取实际来源，普通问题保留模型规划和结果回传。
+
+MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只读工具注解；身份使用现有 APIKeys，ContextVar 隔离并发请求。curl 复用 Ubuntu Tinyproxy 1.11.1、APT 元数据 SHA256 校验和现有 Docker 出口白名单。既有 E2B/MCP 任务分派优先，避免新搜索入口覆盖执行器。
+
+依据：[Brave 参数](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[Claude Code 网络沙箱](https://code.claude.com/docs/en/sandboxing)、[Tinyproxy 配置](https://github.com/tinyproxy/tinyproxy/blob/master/docs/man5/tinyproxy.conf.txt.in)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)、[curl 官方镜像](https://github.com/curl/curl-container)。客户端代理变量可被 curl 参数绕过，因此受控测试还使用内部 Docker 网络；不能仅凭设置环境变量宣称阻止直连。

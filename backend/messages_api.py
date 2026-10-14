@@ -45,6 +45,11 @@ def dispatch(handler, fields):
         from runtime_api import messages
         messages(handler, fields=fields, standard=True)
         return True
+    from network_tools import enabled
+    if any(isinstance(t, dict) and str(t.get('type', '')).startswith(('web_search_', 'web_fetch_')) for t in tools) and enabled():
+        from network_messages import messages
+        messages(handler, fields)
+        return True
     history = any(isinstance(b, dict) and b.get('type') in {'tool_use', 'tool_result'}
                   for m in (fields.get('messages') or []) if isinstance(m, dict)
                   for b in (m['content'] if isinstance(m.get('content'), list) else []))

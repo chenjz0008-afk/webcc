@@ -8,6 +8,7 @@ __pycache__/
 *.pem
 *.key
 E2Bkey.txt
+bravekey.txt
 serverconfig.txt
 cc*.txt
 *-import.json

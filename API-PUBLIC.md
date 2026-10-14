@@ -1,6 +1,6 @@
 # WebCC API 接入说明
 
-文档版本：2026-10-10
+文档版本：2026-10-14
 
 ## 1. 连接配置
 
@@ -275,7 +275,29 @@ Files 提供上传、查询、下载和删除，并按调用密钥隔离。UTF-8
 | 远程 MCP | Messages 声明 mcp_servers 与 mcp_toolset，仅连接管理员允许的 HTTPS 服务 | mcp、messages |
 | 工具目录检索 | POST /v1/tools/search，传入 tools、query 和可选 limit | experimental_tools |
 
-联网搜索可声明 `web_search_20250305`，并设置 `allowed_domains` 或 `blocked_domains`。域名规则包含子域名，可附路径。WebCC 过滤返回来源，并提供允许来源的可核验摘录；没有匹配来源时明确返回无匹配结果。此限制作用于返回内容，不保证网页上游的内部检索范围。
+联网搜索可声明 `web_search_20250305`，并设置 `allowed_domains` 或 `blocked_domains`。域名规则包含子域名，可附路径。WebCC 过滤返回来源，并提供允许来源的可核验摘录；没有匹配来源时明确返回无匹配结果。配置 Brave 后，显式搜索工具使用 Brave 检索并校验返回来源；普通对话未声明工具时仍由网页通道处理。`max_uses` 限制单次请求的实际搜索次数，达到限制返回 `pause_turn`。
+
+### 独立搜索与网页读取
+
+使用相同调用密钥，需 messages 权限。
+
+```bash
+curl --fail-with-body -sS --max-time 30 \
+  'https://165.154.205.213/v1/network/search' \
+  -H "Authorization: Bearer $CLEWDR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Python csv DictReader fieldnames","count":3,"allowed_domains":["docs.python.org"]}'
+```
+
+返回 provider、results 和 query；每条结果包含 url、title、snippets。count 为 1～20，查询最长 600 字符、75 个词。可设置 blocked_domains、freshness（pd、pw、pm、py 或 YYYY-MM-DDtoYYYY-MM-DD）。无匹配来源时 results 为空。
+
+`POST /v1/network/fetch` 传入 `{"url":"https://docs.python.org/3/library/csv.html"}`，返回 url 和 text；仅接受公开 HTTPS 地址。
+
+### MCP 网络工具
+
+标准 Streamable HTTP 地址：`https://165.154.205.213/network/mcp`。请求头使用 `Authorization: Bearer <调用密钥>`；提供 search_web 与 fetch_url。需要 MCP 支持的客户端，配置示例见 [客户端联网](docs/CLIENT-NETWORK.md)。
+
+Claude Code 的 Bash/curl 在客户端执行。Base URL 不会改变 curl 的出口；受控环境须另外配置代理和网络隔离。
 
 ### 文件上传与引用
 
