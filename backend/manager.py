@@ -865,6 +865,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('X-WebCC-Upstream-Model', self.model_metadata['upstream'])
             if getattr(self, "retry_after", None) is not None:
                 self.send_header("Retry-After", str(self.retry_after))
+            if getattr(self, 'should_retry', None) is False:
+                self.send_header('x-should-retry', 'false')
             if getattr(self, "request_id", None):
                 self.send_header("X-Request-Id", self.request_id)
                 self.send_header("Request-Id", self.request_id)
@@ -1147,7 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
                               "account_id": account["id"], "attempt": len(attempted),
                               "status": failure[0], "reason": failure[1]}), flush=True)
         status, message = failure
-        self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": status in {429, 502, 503, 504} or status >= 500}})
+        self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": getattr(self, 'should_retry', True) and (status in {429, 502, 503, 504} or status >= 500)}})
 
     def forward_attempt(self, account, body):
         try:
@@ -1227,12 +1229,18 @@ class Handler(BaseHTTPRequestHandler):
                     payload = json.loads(data)
                     payload['content'] = [b for b in payload.get('content', []) if b.get('type') not in {'thinking', 'redacted_thinking'}]
                     if not payload['content'] and payload.get('stop_reason') != 'refusal':
+                        if self.classifier_request:
+                            self.should_retry = False
                         return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
                     if self.classifier_request:
                         from auxiliary_requests import validate
                         try:
                             validate(payload, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                         except ValueError:
+                            self.should_retry = False
+                            from auxiliary_requests import diagnostics
+                            print(json.dumps({'event':'classifier_invalid','request_id':self.request_id,
+                                              'full_review':getattr(self,'classifier_full',False),**diagnostics(payload)}),flush=True)
                             return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                     data = json.dumps(payload, ensure_ascii=False).encode()
                 try:
@@ -1354,6 +1362,8 @@ class Handler(BaseHTTPRequestHandler):
             if state.failed or not adapter.finished or not state.meaningful and adapter.result.get('stop_reason') not in {'refusal', 'max_tokens'}:
                 raise http.client.HTTPException('Incomplete native Messages stream')
             if not visible.meaningful and adapter.result.get('stop_reason') != 'refusal':
+                if self.classifier_request:
+                    self.should_retry = False
                 return 502, '上游未返回可用正文，可能在生成正文前已达到输出限制'
             if self.native_stream_requested:
                 self.write_stream(b'0\r\n\r\n')
@@ -1363,6 +1373,10 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         validate(adapter.result, self.classifier_delimiter, getattr(self, 'classifier_full', False))
                     except ValueError:
+                        self.should_retry = False
+                        from auxiliary_requests import diagnostics
+                        print(json.dumps({'event':'classifier_invalid','request_id':self.request_id,
+                                          'full_review':getattr(self,'classifier_full',False),**diagnostics(adapter.result)}),flush=True)
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
                 self.respond(200, adapter.result)

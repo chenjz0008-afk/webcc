@@ -167,3 +167,5 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 响应速度分别记录首段正文、单次模型调用与整项任务耗时。SDK 协议通过、文件真正保存、任务结果准确和客户端实际执行是不同验收项；营销草稿的无依据性能描述仍按内容异常记录。原始输入输出及令牌记录仅保存在仓库外。
 
 实际深测进一步发现：新版 Claude Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
+
+完整审批的复测仍有空拒答，不能只凭识别正确宣称自动模式恢复。格式适配保留完整安全规则与历史，仅将末尾请求私有推理的输出指令改为最终判定和规则要求的简短理由。返回结果仍做相同校验；协议缺失不重写为允许。补充只含停止原因、长度和标签的脱敏诊断，并对无完整判定的响应设置 x-should-retry: false，依据 [官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/_base_client.py)与 [TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript/blob/main/src/client.ts) 的重试实现，避免重复消费审批请求造成长时间无可见进度。瞬时上游故障的既有重试不受此规则影响。

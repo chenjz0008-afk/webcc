@@ -41,12 +41,26 @@ class ReviewTests(unittest.TestCase):
                         {'system':'You are helpful'},{'stream':True},{'thinking':{'type':'adaptive'}}):
             self.assertFalse(is_classifier({**fields,**changes}))
         for text in ('<thinking>Synthetic review.</thinking><block>no</block>',
+                     '<block>yes</block>\n<category>Data Exfiltration</category>\n<reason>[Data Exfiltration] Sends private material.</reason>',
                      '<block>yes</block><category>Data Exfiltration</category><reason>[Data Exfiltration] Sends private material.</reason>'):
             message={'content':[{'type':'text','text':text}],'stop_reason':'end_turn'}
             original=copy.deepcopy(message);validate(message,'</block>',True);self.assertEqual(message,original)
         for text in ('<block>yes</block>','<thinking>truncated','<block>no</block> garbage'):
             with self.assertRaises(ValueError):validate({'content':[{'type':'text','text':text}],'stop_reason':'end_turn'},'</block>',True)
         with self.assertRaises(ValueError):validate({'content':[],'stop_reason':'refusal'},'</block>',True)
+        from auxiliary_requests import diagnostics
+        info=diagnostics({'stop_reason':'refusal','content':[{'type':'text','text':'private fixture data'}]})
+        self.assertEqual(info['text_characters'],20)
+        self.assertNotIn('private',json.dumps(info))
+
+    def test_full_review_requests_a_verdict_without_private_reasoning(self):
+        fields=full_review_request()
+        fields['messages'][-1]['content']+=' Think longer on ambiguous or borderline actions; keep reasoning brief for clear-cut ones.'
+        original=copy.deepcopy(fields);prepared=prepare(fields)
+        self.assertEqual(fields,original)
+        self.assertEqual(prepared['system'],fields['system'])
+        self.assertIn('Return only the final <block> verdict',prepared['messages'][-1]['content'])
+        self.assertNotIn('Use <thinking>',prepared['messages'][-1]['content'])
     def test_classifier_recognition_requires_the_complete_protocol(self):
         fields=review();self.assertTrue(is_classifier(fields))
         for changes in ({'max_tokens':2048},{'thinking':{'type':'adaptive'}},{'stop_sequences':['STOP']},
@@ -180,8 +194,9 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def test_classifier_no_verdict_is_not_account_failure_and_not_replayed(self):
         self.reply([{'type':'thinking','thinking':'Synthetic reasoning'}],reason='max_tokens')
         for _ in range(3):
-            status,_,raw=self.request('POST','/v1/messages',review())
+            status,headers,raw=self.request('POST','/v1/messages',review())
             self.assertEqual(status,502)
+            self.assertEqual(dict(headers).get('x-should-retry'),'false')
             self.assertNotIn(b'Synthetic reasoning',raw)
         self.assertEqual(len(base.Worker.seen),3)
         self.assertEqual(self.manager.get_account(self.identity)['status'],'ready')

@@ -1,5 +1,6 @@
 """Bounded adaptation of Claude Code's explicit permission review protocols."""
 import re
+import copy
 
 
 def full_review(fields):
@@ -26,8 +27,20 @@ def is_classifier(fields):
 
 def prepare(fields):
     # The web transport spends its ceiling on reasoning even with thinking disabled.
-    return {**fields, 'max_tokens': max(fields['max_tokens'], 1024),
+    result = {**fields, 'max_tokens': max(fields['max_tokens'], 1024),
             'output_config': {**fields.get('output_config', {}), 'effort': 'low'}}
+    if full_review(fields):
+        result['messages'] = copy.deepcopy(fields['messages'])
+        content = result['messages'][-1]['content']
+        old = 'Use <thinking> before responding with <block>. Think longer on ambiguous or borderline actions; keep reasoning brief for clear-cut ones.'
+        new = 'Return only the final <block> verdict and the brief <category>/<reason> required by the rules. Do not include private reasoning.'
+        if isinstance(content, str):
+            result['messages'][-1]['content'] = content.replace(old, new)
+        else:
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get('text'), str):
+                    block['text'] = block['text'].replace(old, new)
+    return result
 
 
 def validate(message, delimiter='</severity>', full=False):
@@ -36,7 +49,7 @@ def validate(message, delimiter='</severity>', full=False):
         text = re.sub(r'^\s*<thinking>.*?</thinking>\s*', '', text, count=1, flags=re.DOTALL)
     if message.get('stop_reason') == 'stop_sequence' and message.get('stop_sequence') == delimiter and not text.rstrip().endswith(delimiter):
         text += delimiter
-    pattern = (r'\s*<block>(yes|no)</block>(?:\s*<category>[A-Za-z0-9 ]{1,128}</category><reason>[^<>]{1,2048}</reason>)?\s*'
+    pattern = (r'\s*<block>(yes|no)</block>(?:\s*<category>[A-Za-z0-9 ]{1,128}</category>\s*<reason>[^<>]{1,2048}</reason>)?\s*'
                if delimiter == '</block>' else
                r'\s*<severity>([0-9]{1,3})</severity>(?:\s*<category>[A-Za-z0-9 ]{1,128}</category>)?\s*')
     match = re.fullmatch(pattern, text)
@@ -46,3 +59,10 @@ def validate(message, delimiter='</severity>', full=False):
         raise ValueError('Allow verdict must not contain block metadata')
     if full and match[1] == 'yes' and ('<category>' not in text or '<reason>' not in text):
         raise ValueError('Full review block verdict requires a rule and reason')
+
+
+def diagnostics(message):
+    text = ''.join(b.get('text', '') for b in message.get('content', []) if b.get('type') == 'text')
+    return {'stop_reason': message.get('stop_reason'), 'text_characters': len(text),
+            'protocol_tags': re.findall(r'</?(?:thinking|block|category|reason)>', text),
+            'has_verdict': bool(re.search(r'<block>(?:yes|no)</block>', text))}
