@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 import test_manager as base
-from worker_profiles import PROFILE, endpoint, expire, maintain, published_port, ready_accounts, state, warm
+from worker_profiles import PROFILE, endpoint, expire, maintain, published_port, ready_accounts, state, warm, initialize, readiness
 
 
 class Profiles(unittest.TestCase):
@@ -91,6 +91,69 @@ class Profiles(unittest.TestCase):
         with patch.object(self.manager, 'acquire', wraps=self.manager.acquire) as acquire:
             maintain(self.manager)
             acquire.assert_not_called()
+
+    def test_startup_readiness_and_memory_degradation(self):
+        self.accounts(4)
+        self.manager.worker_profile_warm = 4
+        self.assertFalse(readiness(self.manager)['ok'])
+        initialize(self.manager)
+        self.assertEqual(readiness(self.manager)['warm'], 4)
+        self.assertTrue(readiness(self.manager)['ok'])
+        self.assertEqual(self.manager.total, 0)
+        with patch('worker_profiles.headroom', return_value=False):
+            maintain(self.manager)
+            result = readiness(self.manager)
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['memory_limited'])
+        self.assertEqual(result['target'], 2)
+
+    def test_http_listener_starts_after_initialization(self):
+        from manager import main
+        order = []
+        with patch('manager.Manager', return_value=self.manager), patch('manager.threading.Thread'), \
+                patch('worker_profiles.initialize', side_effect=lambda m: order.append('prewarm')), patch('manager.Server') as server:
+            server.return_value.serve_forever.side_effect = lambda: order.append('listen')
+            main()
+        self.assertEqual(order, ['prewarm', 'listen'])
+
+    def test_failed_initialization_does_not_claim_readiness(self):
+        self.accounts(1)
+        with patch('worker_profiles.maintain', side_effect=OSError('fixture Docker failure')):
+            initialize(self.manager)
+        self.assertFalse(self.manager.prewarm_complete)
+        self.assertFalse(readiness(self.manager)['ok'])
+
+    def test_readiness_is_separate_from_liveness(self):
+        self.accounts(1)
+        status, _, _ = base.ManagerTests.request(self, 'GET', '/healthz')
+        self.assertEqual(status, 200)
+        self.assertEqual(base.ManagerTests.request(self, 'GET', '/readyz')[0], 503)
+        initialize(self.manager)
+        self.assertEqual(base.ManagerTests.request(self, 'GET', '/readyz')[0], 200)
+
+    def test_no_eligible_local_resource_is_not_a_ready_warm_pool(self):
+        account = self.accounts(1)[0]
+        self.manager.set_status(account, 'quarantined', 'fixture')
+        initialize(self.manager)
+        self.assertEqual(readiness(self.manager)['eligible'], 0)
+        self.assertFalse(readiness(self.manager)['ok'])
+
+    def test_slow_startup_is_bounded_and_later_becomes_ready(self):
+        self.accounts(1)
+        release = threading.Event()
+        original = maintain
+        def delayed(*args, **kwargs):
+            release.wait(2)
+            return original(*args, **kwargs)
+        with patch('worker_profiles.STARTUP_SECONDS', .01), patch('worker_profiles.maintain', side_effect=delayed):
+            worker = initialize(self.manager)
+            try:
+                self.assertTrue(worker.is_alive())
+                self.assertFalse(readiness(self.manager)['ok'])
+            finally:
+                release.set()
+                worker.join(2)
+        self.assertTrue(readiness(self.manager)['ok'])
 
     def test_maintenance_never_takes_last_interactive_slot(self):
         accounts = self.accounts(4)

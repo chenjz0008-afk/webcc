@@ -173,3 +173,29 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 标准工具历史接受官方 SDK 完整序列化中的空 `caller`、`toolset_name` 字段；直接调用元数据保留。历史只检查结构和调用结果配对，不用当前工具 Schema 重判已经执行的旧参数；新调用仍经过当前 Schema 校验。工具定义更新或延迟加载不会清除旧结果。
 
 工具 JSON 后已确认的 `</parameter>` 尾标记在 JSON 边界之外适配，不修改 JSON 字符串或调用参数；额外 JSON、未知尾随内容和不完整标记仍视为无效。已确认的代理 `ProxyConnect` 故障在释放租约前计入失败并冷却 60 秒；永久隔离仍按原连续失败阈值执行，不直连回退。
+
+## 启动就绪与响应耗时
+
+启动先检查工具预热池，再打开 HTTP 监听；启动等待最多 20 秒，超时后健康接口仍可访问，就绪接口继续报告未就绪，预热在后台完成。后台每 15 秒维护预热池，与 Git 更新检查分开。预热只检查容器与 HTTP 就绪，不发送模型问候，也不证明账号额度或上游会话可用。账号巡检、Git 更新周期、每号并发 1 和全局并发 4 保持原配置。
+
+`GET /healthz` 检查进程存活；`GET /readyz` 返回预热就绪状态，不通过时为 503。部署后应等待后者为 200。返回 warm、target、configured_target、eligible 和 memory_limited；低内存仍执行原来的两容器保留策略。仅作为远程调度网关、不挂本地账号的节点应设置 MANAGER_WORKER_PROFILE_WARM=0。本地没有可用资源时不会把空池标成已预热。
+
+有足够内存时当前预热目标为 4，并不表示全部账号均常驻工具容器。限定账号范围的密钥可能仍遇到冷启动。后台故障检测有周期，容器也可能在就绪检查后退出；请求入口继续执行真实端点检查和原有恢复策略。
+
+| 日志字段 | 含义 |
+| --- | --- |
+| worker_prewarm_startup | 开始监听前的预热耗时和就绪状态 |
+| worker_profile_access | 实际预热命中或冷准备耗时，区分业务请求和预热 |
+| request_timing.stages.queue | 排队与分配账号，重试累加 |
+| worker_prepare | 本机执行端点准备或远程节点连接对象准备 |
+| upstream_headers | 发出上游请求到收到响应头，含 ClewdR 内部网络与网页等待 |
+| upstream_read | 读取上游结果；工具流还包含增量回调及背压等待 |
+| validation / adapter | 本地结果校验或协议转换；可能包含输出或引用读取 |
+| firsts.upstream_content / upstream_text | 上游首个真实内容或正文到达 |
+| firsts.client_content / client_text | 网关实际写出首内容或流式正文；心跳、空思考不计入 |
+
+日志只保存请求 ID、路由、状态、账号 ID、时长和命中状态，不保存正文、密钥或代理凭据。各阶段可能有并行或嵌套，不能直接相加当成总耗时。字段按通道记录；工具通道的 upstream_text 可能是协议 JSON，不能当成用户正文。服务端计时不包含客户端到网关的完整网络往返；非流式 client_content 代表完整结果开始交付，不是模型首字。严格工具模式仍在完整校验后交付。
+
+从网关外部无法精确拆开 ClewdR 内部的代理握手、上游排队与模型预填充；upstream_headers 应作为组合阶段分析，不能将其全算成代理或模型耗时。存活与就绪分开的依据见 [Kubernetes 官方说明](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)，项目无需引入 Kubernetes。
+
+同一节点的 Docker 出口链是共享系统资源，策略文件与锁统一使用节点环境 MANAGER_DATA（默认 /var/lib/clewdr-manager）。临时候选实例可使用独立 Manager 数据目录，但不能据此创建局部出口策略并覆盖共享链。容器回收验收必须同时检查回收前后完整允许集合和默认 DROP。

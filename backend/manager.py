@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
+from request_timing import CURRENT, Timing, measure, timed
 
 
 ROOT = Path(__file__).resolve().parent
@@ -393,7 +394,8 @@ class Manager:
             proxy = config["proxy"]
             if proxy.startswith("socks5://"):
                 proxy = "socks5h://" + proxy[len("socks5://"):]
-            network = egress.prepare(self.data, account["id"], proxy)
+            policy_data = Path(os.environ.get('MANAGER_DATA', '/var/lib/clewdr-manager'))
+            network = egress.prepare(policy_data, account["id"], proxy)
             if proxy != config["proxy"]:
                 private_write(path, re.sub(r"(?m)^proxy\s*=.*$", lambda _: "proxy = " + json.dumps(proxy), text))
             return network
@@ -638,6 +640,7 @@ class Manager:
             else:
                 raise Problem(404, "操作不存在")
 
+    @timed('queue')
     def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None, record_dispatch=True):
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
@@ -708,6 +711,8 @@ class Manager:
                             self.dispatches[account["id"]] = self.dispatches.get(account["id"], 0) + 1
                         self.inflight[account["id"]] = 1
                         self.total += 1
+                        if getattr(CURRENT, 'timing', None):
+                            CURRENT.timing.accounts.append(account['id'])
                         return account
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -723,6 +728,7 @@ class Manager:
                         print('queue_cleanup_failed', flush=True)
                 self.condition.notify_all()
 
+    @timed('worker_prepare')
     def worker_connection(self, account, timeout, profile=None):
         node = account.get("node_id", "node-1")
         if node in self.nodes:
@@ -846,6 +852,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def send_response(self, code, message=None):
+        timing = getattr(self, 'timing', None)
+        if timing:
+            timing.status = code
+        super().send_response(code, message)
+
     @property
     def manager(self):
         return self.server.manager
@@ -881,6 +893,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
+            if status == 200 and getattr(self, 'timing', None):
+                self.timing.first('client_content')
         except OSError:
             raise ClientGone()
 
@@ -953,6 +967,18 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def handle_request(self):
+        route = self.path.split('?', 1)[0]
+        self.timing = Timing(route) if self.command == 'POST' and route in POST_ROUTES else None
+        previous = getattr(CURRENT, 'timing', None)
+        CURRENT.timing = self.timing
+        try:
+            self._handle_request()
+        finally:
+            if self.timing:
+                self.timing.finish(self.request_id)
+            CURRENT.timing = previous
+
+    def _handle_request(self):
         self.request_id = uuid.uuid4().hex
         self.caller_key, self.allowed_accounts, self.retry_after, self.adapter = None, None, None, None
         try:
@@ -970,6 +996,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, path.read_bytes(), content_type)
             elif route == "/healthz" and self.command == "GET":
                 self.respond(200, {"ok": True})
+            elif route == '/readyz' and self.command == 'GET':
+                from worker_profiles import readiness
+                result = readiness(self.manager)
+                self.respond(200 if result['ok'] else 503, result)
             elif route.startswith("/admin/"):
                 self.authenticate(admin=True)
                 with self.manager.condition:
@@ -1204,9 +1234,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             headers = {k: self.headers[k] for k in ("Content-Type", "anthropic-version", "anthropic-beta", "Accept") if k in self.headers}
             headers.update({"Authorization": "Bearer " + account["key"], "Accept-Encoding": "identity"})
-            connection.request(self.command, self.path, body, headers)
-            self.upstream_timeout(connection)
-            response = connection.getresponse()
+            with measure('upstream_headers'):
+                connection.request(self.command, self.path, body, headers)
+                self.upstream_timeout(connection)
+                response = connection.getresponse()
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
             if response.status >= 400:
@@ -1225,7 +1256,8 @@ class Handler(BaseHTTPRequestHandler):
                 chunks, size = [], 0
                 while size <= 32 * 1024 * 1024:
                     self.upstream_timeout(connection)
-                    chunk = response.read1(65536)
+                    with measure('upstream_read'):
+                        chunk = response.read1(65536)
                     if not chunk:
                         break
                     chunks.append(chunk)
@@ -1296,7 +1328,8 @@ class Handler(BaseHTTPRequestHandler):
             stream, prefix, prefix_size = StreamState(), [], 0
             while not stream.meaningful and not stream.finished and not stream.failed:
                 self.upstream_timeout(connection)
-                chunk = response.read1(65536)
+                with measure('upstream_read'):
+                    chunk = response.read1(65536)
                 if not chunk:
                     if response.length not in (None, 0):
                         raise http.client.IncompleteRead(b"")
@@ -1336,7 +1369,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_stream(("%x\r\n" % len(chunk)).encode() + chunk + b"\r\n")
             while True:
                 self.upstream_timeout(connection)
-                chunk = response.read1(65536)
+                with measure('upstream_read'):
+                    chunk = response.read1(65536)
                 if not chunk:
                     if response.length not in (None, 0):
                         raise http.client.IncompleteRead(b"")
@@ -1385,14 +1419,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 self.upstream_timeout(connection)
-                chunk = response.read1(65536)
+                with measure('upstream_read'):
+                    chunk = response.read1(65536)
                 if not chunk:
                     if response.length not in (None, 0):
                         raise http.client.IncompleteRead(b'')
                     break
                 state.feed(chunk)
-                normalized = adapter.feed(chunk)
+                with measure('adapter'):
+                    normalized = adapter.feed(chunk)
                 visible.feed(normalized)
+                if (state.meaningful or visible.meaningful) and getattr(self, 'timing', None):
+                    self.timing.first('upstream_content')
                 size += len(normalized)
                 if size > 32 * 1024 * 1024:
                     raise ValueError('Messages response exceeds 32 MiB')
@@ -1459,6 +1497,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(data)
             self.wfile.flush()
+            if getattr(self, 'timing', None):
+                self.timing.client(data)
         except OSError:
             raise ClientGone()
 
@@ -1501,13 +1541,11 @@ def main():
                       os.environ.get("CLEWDR_PASSWORD", ""), os.environ.get("CLEWDR_ADMIN_PASSWORD", ""),
                       int(os.environ.get("MANAGER_MAX_INFLIGHT", "4")), int(os.environ.get("MANAGER_QUEUE_SIZE", "16")),
                       float(os.environ.get("MANAGER_QUEUE_SECONDS", "15")))
+    from worker_profiles import initialize, run as maintain_profiles
+    initialize(manager)
+    threading.Thread(target=maintain_profiles, args=(manager, threading.Event()), daemon=True).start()
     def maintenance():
         while True:
-            try:
-                from worker_profiles import maintain
-                maintain(manager)
-            except Exception as error:
-                print('worker_profile_cleanup_failed', type(error).__name__, flush=True)
             interval = max(60, int(os.environ.get("MANAGER_UPDATE_SECONDS", "86400")))
             delay = manager.state["update"].get("checked_at", 0) + interval - time.time()
             if delay > 0:
