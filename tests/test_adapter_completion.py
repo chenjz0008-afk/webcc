@@ -42,6 +42,20 @@ class StateAndCacheTests(unittest.TestCase):
         self.assertEqual(block['signature'],'')
         self.assertNotIn('signature',start['content_block'])
 
+    def test_web_thinking_summary_is_a_standard_delta_in_both_paths(self):
+        from native_events import NativeEvents
+        from upstream_message import normalize_event
+        value={'type':'content_block_delta','index':0,'delta':{'type':'thinking_summary_delta',
+               'summary':{'summary':'Determining whether an uploaded file counts as a user instruction.'}}}
+        normalized=normalize_event(value)
+        self.assertEqual(normalized['delta'],{'type':'thinking_delta','thinking':value['delta']['summary']['summary']})
+        native=NativeEvents(manager(),'owner')
+        native.frame({'type':'content_block_start','index':0,'content_block':{'type':'thinking','thinking':''}})
+        framed=json.loads(native.frame(value)[0].split(b'data: ',1)[1])
+        self.assertEqual(framed,normalized)
+        self.assertEqual(native.blocks[0]['thinking'],normalized['delta']['thinking'])
+        with self.assertRaises(ValueError):normalize_event({**value,'delta':{'type':'thinking_summary_delta','summary':None}})
+
     def test_thinking_owner_integrity_expiry_and_native_signature(self):
         m=manager();original={'type':'thinking','thinking':'Actual upstream summary','start_timestamp':None}
         signed=seal(m,'owner',original,'actual-model')

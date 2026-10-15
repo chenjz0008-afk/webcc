@@ -6,6 +6,15 @@ class UnexpectedTool(ValueError):
     pass
 
 
+def normalize_event(event):
+    if event.get('type') == 'content_block_delta' and event.get('delta', {}).get('type') == 'thinking_summary_delta':
+        summary = event['delta'].get('summary', {})
+        if not isinstance(summary, dict) or not isinstance(summary.get('summary'), str):
+            raise ValueError('Invalid upstream thinking summary')
+        return {**event, 'delta': {'type': 'thinking_delta', 'thinking': summary['summary']}}
+    return event
+
+
 def read(response, thinking=False, on_event=None):
     if 'text/event-stream' not in response.getheader('Content-Type', ''):
         raw = response.read(1048577)
@@ -27,7 +36,7 @@ def read(response, thinking=False, on_event=None):
             raise ValueError('Upstream stream exceeds limit')
         if not line.startswith(b'data: '):
             continue
-        event = json.loads(line[6:])
+        event = normalize_event(json.loads(line[6:]))
         if on_event:
             on_event(event)
         kind = event.get('type')

@@ -198,3 +198,5 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 65 轮真实耐久测试发现 Thinking 开始块缺少 signature，官方 Python SDK 严格验证会在 signature_delta 前拒绝。按官方 [ThinkingBlock](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/thinking_block.py) 和 [流协议](https://platform.claude.com/docs/en/build-with-claude/streaming) 保留开始块空 signature，再传签名增量，覆盖普通及工具适配路径。
 
 另一真实故障为完整工具 JSON 后再次生成 JSON。严格工具模式复用现有完整校验及有限纠正，先校验整段结果再交付，避免已发出调用后才发现无效尾部。普通增量和显式 eager 模式继续执行不重放边界；不把额外 JSON 当作可忽略噪声。
+
+公网严格 SDK 测试进一步发现网页 thinking_summary_delta 不是标准增量类型。共享 upstream_message.normalize_event 将真实 summary.summary 字符串转换为 thinking_delta；普通 NativeEvents 和工具上游读取复用，内容不丢弃，后续平台签名覆盖标准化后的真实内容。回归保存实际失败样本；不把摘要称为隐藏完整推理。

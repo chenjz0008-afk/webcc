@@ -7,6 +7,7 @@ from history_state import cipher, seal
 from message_stream import event
 from source_text import text, quote
 from web_files import FileProblem
+from upstream_message import normalize_event
 
 SOURCE_PREFIX='webccsource_v1_'
 
@@ -41,7 +42,7 @@ class NativeEvents:
         return value
 
     def frame(self,value):
-        value=copy.deepcopy(value);kind=value.get('type');index=value.get('index')
+        value=normalize_event(copy.deepcopy(value));kind=value.get('type');index=value.get('index')
         if kind=='message_start':self.model=value['message'].get('model','unknown')
         if kind=='content_block_start':
             block=value['content_block'];self.blocks[index]=copy.deepcopy(block)
