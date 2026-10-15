@@ -394,7 +394,8 @@ class Manager:
             proxy = config["proxy"]
             if proxy.startswith("socks5://"):
                 proxy = "socks5h://" + proxy[len("socks5://"):]
-            network = egress.prepare(self.data, account["id"], proxy)
+            policy_data = Path(os.environ.get('MANAGER_DATA', '/var/lib/clewdr-manager'))
+            network = egress.prepare(policy_data, account["id"], proxy)
             if proxy != config["proxy"]:
                 private_write(path, re.sub(r"(?m)^proxy\s*=.*$", lambda _: "proxy = " + json.dumps(proxy), text))
             return network

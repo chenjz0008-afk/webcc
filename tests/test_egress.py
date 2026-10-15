@@ -66,6 +66,20 @@ class EgressTests(unittest.TestCase):
             self.assertIn('socks5h://', path.read_text())
             self.assertIn('max_retries = 5', path.read_text())
 
+    def test_candidate_and_gateway_share_the_node_policy_directory(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+                'MANAGER_PROXY_ONLY': 'true', 'MANAGER_DATA': str(Path(temp) / 'node')}):
+            gateway = Manager(Path(temp) / 'gateway', 'image', 'api', 'admin')
+            candidate = Manager(Path(temp) / 'candidate', 'image', 'api', 'admin')
+            source = Path(temp) / 'account'
+            source.mkdir()
+            (source / 'clewdr.toml').write_text('proxy = "socks5h://u:p@8.8.8.8:1080"\n')
+            account = {'id': 'a' * 12, 'directory': str(source)}
+            with patch.object(egress, 'prepare', return_value=['--network', 'test']) as prepare:
+                gateway.worker_network(account)
+                candidate.worker_network(account)
+            self.assertEqual([c.args[0] for c in prepare.call_args_list], [Path(temp) / 'node'] * 2)
+
 
 if __name__ == '__main__':
     unittest.main()

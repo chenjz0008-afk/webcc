@@ -197,3 +197,5 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 日志只保存请求 ID、路由、状态、账号 ID、时长和命中状态，不保存正文、密钥或代理凭据。各阶段可能有并行或嵌套，不能直接相加当成总耗时。字段按通道记录；工具通道的 upstream_text 可能是协议 JSON，不能当成用户正文。服务端计时不包含客户端到网关的完整网络往返；非流式 client_content 代表完整结果开始交付，不是模型首字。严格工具模式仍在完整校验后交付。
 
 从网关外部无法精确拆开 ClewdR 内部的代理握手、上游排队与模型预填充；upstream_headers 应作为组合阶段分析，不能将其全算成代理或模型耗时。存活与就绪分开的依据见 [Kubernetes 官方说明](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)，项目无需引入 Kubernetes。
+
+同一节点的 Docker 出口链是共享系统资源，策略文件与锁统一使用节点环境 MANAGER_DATA（默认 /var/lib/clewdr-manager）。临时候选实例可使用独立 Manager 数据目录，但不能据此创建局部出口策略并覆盖共享链。容器回收验收必须同时检查回收前后完整允许集合和默认 DROP。
