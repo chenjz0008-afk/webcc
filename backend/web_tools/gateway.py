@@ -13,6 +13,7 @@ from jsonschema.exceptions import ValidationError, SchemaError, RefResolutionErr
 from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
 from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
+from request_timing import measure
 
 
 MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
@@ -122,6 +123,10 @@ def _forward(handler, admit, raw=None, standard=False):
             incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
 
         def progress(value):
+            if getattr(handler, 'timing', None):
+                handler.timing.observe('upstream', value)
+            if not incremental:
+                return
             while not cancelled.is_set():
                 try:
                     pending.put(value, timeout=.2)
@@ -136,16 +141,18 @@ def _forward(handler, admit, raw=None, standard=False):
                     return
                 from node_transport import semantic_headers
                 headers = semantic_headers(handler.headers) if standard else {}
-                connection.request('POST', handler.path if standard else '/v1/messages', body, {'content-type': 'application/json',
-                    'anthropic-version': '2023-06-01', **headers, 'Authorization': 'Bearer ' + account['key'], 'Accept-Encoding': 'identity'})
-                transport['socket'] = connection.sock
-                if cancelled.is_set():
-                    return
-                response = connection.getresponse()
+                with measure('upstream_headers', getattr(handler, 'timing', None)):
+                    connection.request('POST', handler.path if standard else '/v1/messages', body, {'content-type': 'application/json',
+                        'anthropic-version': '2023-06-01', **headers, 'Authorization': 'Bearer ' + account['key'], 'Accept-Encoding': 'identity'})
+                    transport['socket'] = connection.sock
+                    if cancelled.is_set():
+                        return
+                    response = connection.getresponse()
                 result.update(status=response.status, retry_after=response.getheader('Retry-After'),
                               node_error=response.getheader('X-WebCC-Node-Error') == '1')
                 from upstream_message import read
-                raw = response.read(1048576) if response.status >= 400 else read(response, thinking=standard, on_event=progress if incremental else None)
+                with measure('upstream_read', getattr(handler, 'timing', None)):
+                    raw = response.read(1048576) if response.status >= 400 else read(response, thinking=standard, on_event=progress)
                 result['body'] = raw
                 from worker_errors import proxy_connect
                 if proxy_connect(response.status, raw):
@@ -157,6 +164,11 @@ def _forward(handler, admit, raw=None, standard=False):
                 connection.close()
                 handler.manager.release(account)
                 done.set()
+                if incremental:
+                    try:
+                        pending.put_nowait(None)
+                    except queue.Full:
+                        pass
 
         thread = threading.Thread(target=fetch, daemon=True)
         try:
@@ -178,11 +190,15 @@ def _forward(handler, admit, raw=None, standard=False):
                 handler.end_headers()
                 sent = True
             while not done.is_set() or not pending.empty():
-                try:
-                    value = pending.get(timeout=.2)
-                    incremental.upstream(value)
-                except queue.Empty:
-                    pass
+                if incremental:
+                    try:
+                        value = pending.get(timeout=.2)
+                        if value is not None:
+                            incremental.upstream(value)
+                    except queue.Empty:
+                        pass
+                else:
+                    done.wait(.2)
                 alive()
                 if time.monotonic() >= handler.request_deadline:
                     raise TimeoutError()
@@ -225,9 +241,10 @@ def _forward(handler, admit, raw=None, standard=False):
             last = (status, 'rate_limit_error' if status == 429 else 'api_error', 'Experimental upstream rejected request')
         else:
             try:
-                message = complete(result['body'], request, handler.manager.processing_cache, handler.caller_key or 'platform')
-                from history_state import message as authenticate_history
-                message = authenticate_history(handler.manager, handler.caller_key or 'platform', message)
+                with measure('validation'):
+                    message = complete(result['body'], request, handler.manager.processing_cache, handler.caller_key or 'platform')
+                    from history_state import message as authenticate_history
+                    message = authenticate_history(handler.manager, handler.caller_key or 'platform', message)
             except OutputProblem as problem:
                 print(json.dumps({'request_id': handler.request_id, 'error': problem.code,
                                   'stage': problem.stage, 'stream_started': bool(incremental and incremental.emitted)}), flush=True)

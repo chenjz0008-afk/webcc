@@ -5,11 +5,13 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 import re
+import threading
 import time
 
 
 PROFILE = 'client-tools'
 IDLE_SECONDS = 600
+STARTUP_SECONDS = 20
 CONTINUATION = (
     'Continue the API conversation supplied in paste.txt; it is the context for this request, '
     'not a request to analyze a transcript. Fulfil its latest user request using its system '
@@ -144,7 +146,7 @@ def published_port(manager, name):
     return port
 
 
-def endpoint(manager, account, profile):
+def endpoint(manager, account, profile, purpose='request'):
     if profile is None:
         return account['port']
     from manager import Problem, private_write
@@ -189,9 +191,14 @@ def endpoint(manager, account, profile):
                 raise
         private_write(manifest, json.dumps({**current, 'used_at': time.time(), 'ready': True}))
         publish(manager, account, True)
-        if cold:
-            print(json.dumps({'event': 'worker_profile_ready', 'account_id': account['id'],
-                              'seconds': round(time.monotonic() - began, 3)}), flush=True)
+        elapsed = round(time.monotonic() - began, 6)
+        if cold or purpose != 'prewarm':
+            print(json.dumps({'event': 'worker_profile_access', 'account_id': account['id'],
+                              'purpose': purpose, 'cache_hit': not cold, 'seconds': elapsed}), flush=True)
+        from request_timing import CURRENT
+        timing = getattr(CURRENT, 'timing', None)
+        if timing:
+            timing.profiles.append({'account_id': account['id'], 'cache_hit': not cold, 'seconds': elapsed})
         return current['port']
 
 
@@ -209,12 +216,12 @@ def remove(manager, account):
     (Path(account['directory']) / 'profiles' / PROFILE / 'profile.json').unlink(missing_ok=True)
 
 
-def maintain(manager, stopped=None):
+def maintain(manager, stopped=None, blocking=False):
     if not manager.worker_profiles_enabled:
-        return
-    with locked(manager.data / 'worker-prewarm.lock', blocking=False) as acquired:
+        return True
+    with locked(manager.data / 'worker-prewarm.lock', blocking=blocking) as acquired:
         if not acquired:
-            return
+            return False
         if manager.cluster:
             manager.cluster.reap_prewarm()
         manager.refresh()
@@ -233,7 +240,7 @@ def maintain(manager, stopped=None):
                 try:
                     account = manager.acquire(item['id'], request_deadline=time.monotonic() + .05,
                                               record_dispatch=False)
-                    endpoint(manager, account, PROFILE)
+                    endpoint(manager, account, PROFILE, purpose='prewarm')
                 except Exception as error:
                     from manager import Problem
                     if account or not isinstance(error, Problem) or error.status not in (429, 503):
@@ -245,3 +252,41 @@ def maintain(manager, stopped=None):
             manager.background.enabled = background
         trim(manager)
         expire(manager)
+        return True
+
+
+def readiness(manager):
+    accounts = [a for a in local_accounts(manager) if a['status'] == 'ready' and
+                a.get('cooldown_until', 0) <= time.time() and not manager.expired(a)]
+    requested = min(manager.worker_profile_warm, len(accounts)) if manager.worker_profiles_enabled else 0
+    target = requested if headroom() else min(2, requested)
+    count = sum(warm(a) for a in accounts)
+    enabled = manager.worker_profiles_enabled and manager.worker_profile_warm > 0
+    return {'ok': bool(getattr(manager, 'prewarm_complete', False)) and count >= target and (bool(accounts) or not enabled),
+            'warm': count, 'target': target, 'configured_target': manager.worker_profile_warm,
+            'eligible': len(accounts), 'memory_limited': target < requested}
+
+
+def initialize(manager):
+    began = time.monotonic()
+    manager.prewarm_complete = False
+    def prepare():
+        try:
+            manager.prewarm_complete = maintain(manager, blocking=True)
+        except Exception as error:
+            print('worker_prewarm_startup_failed', type(error).__name__, flush=True)
+    worker = threading.Thread(target=prepare, daemon=True)
+    worker.start()
+    worker.join(STARTUP_SECONDS)
+    print(json.dumps({'event': 'worker_prewarm_startup', 'seconds': round(time.monotonic() - began, 6),
+                      'pending': worker.is_alive(), **readiness(manager)}), flush=True)
+    return worker
+
+
+def run(manager, stopped):
+    while not stopped.wait(15):
+        try:
+            if maintain(manager, stopped):
+                manager.prewarm_complete = True
+        except Exception as error:
+            print('worker_prewarm_maintenance_failed', type(error).__name__, flush=True)
