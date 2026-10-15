@@ -199,3 +199,9 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 从网关外部无法精确拆开 ClewdR 内部的代理握手、上游排队与模型预填充；upstream_headers 应作为组合阶段分析，不能将其全算成代理或模型耗时。存活与就绪分开的依据见 [Kubernetes 官方说明](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)，项目无需引入 Kubernetes。
 
 同一节点的 Docker 出口链是共享系统资源，策略文件与锁统一使用节点环境 MANAGER_DATA（默认 /var/lib/clewdr-manager）。临时候选实例可使用独立 Manager 数据目录，但不能据此创建局部出口策略并覆盖共享链。容器回收验收必须同时检查回收前后完整允许集合和默认 DROP。
+
+### Claude Code 的 auto 与 bypassPermissions
+
+auto 审批按完整安全监控协议识别，接受 JSON 和 SSE 请求，复用原审批执行配置。短审批必须取得完整、有效的真实判定后才能交付；SSE 在校验后发送，不代表判定过程的实时增量。空回复、截断和无效判定不会变成放行；普通聊天流式保持原路径。同一 HTTP 长连接上的请求分别初始化审批状态。
+
+bypassPermissions 跳过客户端工具审批，不需要也不会由网关伪造放行。认证、资源隔离、代理出口和工具自身的网络检查仍生效。WebFetch 的域名安全检查与 auto 分类器是不同环节；切换 bypass 不能保证解决域名检查、代理白名单或站点读取失败。诊断时应分别保存审批回复、工具结果与最后正文，不能只以 CLI 退出码为零认定整个任务通过。

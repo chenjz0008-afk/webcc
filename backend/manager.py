@@ -1117,6 +1117,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = self.body() if self.command == "POST" else None
         self.classifier_request = False
+        self.classifier_stream_requested = False
         if body:
             try:
                 payload = json.loads(body)
@@ -1130,6 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
                                       'classifier': self.classifier_request}
                 self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
                 if self.classifier_request:
+                    self.classifier_stream_requested = bool(payload.get('stream'))
                     self.classifier_full = full_review(payload)
                     self.classifier_delimiter = (payload.get('stop_sequences') or ['</block>'])[0]
                     payload = prepare_classifier(payload)
@@ -1177,7 +1179,7 @@ class Handler(BaseHTTPRequestHandler):
                 except DocumentProblem as error:
                     raise Problem(400, str(error)) from None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                self.native_stream_requested = bool(payload.get('stream'))
+                self.native_stream_requested = bool(payload.get('stream')) and not self.classifier_request
                 self.native_adapter = True
                 payload['stream'] = True
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -1317,7 +1319,10 @@ class Handler(BaseHTTPRequestHandler):
                         from capability_policy import model_name
                         self.model_metadata = {'requested': getattr(self, 'requested_model', 'unknown'),
                                                'upstream': model_name(json.loads(data).get('model'))}
-                    self.respond(response.status, data, response.getheader("Content-Type") or "application/json")
+                    if getattr(self, 'classifier_stream_requested', False):
+                        self.respond_native(payload)
+                    else:
+                        self.respond(response.status, data, response.getheader("Content-Type") or "application/json")
                 except OSError:
                     raise ClientGone()
                 if self.command == "POST":
@@ -1408,6 +1413,16 @@ class Handler(BaseHTTPRequestHandler):
                           'output_tokens': message.get('usage', {}).get('output_tokens')}), flush=True)
         return 502, '上游未返回可用正文'
 
+    def respond_native(self, message):
+        if getattr(self, 'classifier_stream_requested', False):
+            from message_stream import Stream
+            self.adapter = 'webcc-native-v1'
+            output = Stream(self)
+            output.start()
+            output.complete(message)
+        else:
+            self.respond(200, message)
+
     def forward_native(self, account, response, connection):
         from native_events import NativeEvents
         from message_stream import Stream
@@ -1464,7 +1479,7 @@ class Handler(BaseHTTPRequestHandler):
                                           'full_review':getattr(self,'classifier_full',False),**diagnostics(adapter.result)}),flush=True)
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
-                self.respond(200, adapter.result)
+                self.respond_native(adapter.result)
             self.manager.record_success(account)
         except ClientGone:
             self.close_connection = True

@@ -38,7 +38,7 @@ class ReviewTests(unittest.TestCase):
         fields=full_review_request();self.assertTrue(is_classifier(fields))
         self.assertEqual(prepare(fields)['max_tokens'],8192)
         for changes in ({'messages':[{'role':'user','content':'ordinary question'}]},
-                        {'system':'You are helpful'},{'stream':True},{'thinking':{'type':'adaptive'}}):
+                        {'system':'You are helpful'},{'thinking':{'type':'adaptive'}}):
             self.assertFalse(is_classifier({**fields,**changes}))
         for text in ('<thinking>Synthetic review.</thinking><block>no</block>',
                      '<block>yes</block>\n<category>Data Exfiltration</category>\n<reason>[Data Exfiltration] Sends private material.</reason>',
@@ -69,6 +69,11 @@ class ReviewTests(unittest.TestCase):
         original=copy.deepcopy(fields)
         self.assertEqual(prepare(fields)['max_tokens'],1024)
         self.assertEqual(fields,original)
+
+    def test_streaming_classifiers_require_the_same_complete_protocol(self):
+        for fields in (review(), full_review_request()):
+            self.assertTrue(is_classifier({**fields, 'stream': True}))
+            self.assertFalse(is_classifier({**fields, 'stream': True, 'system': 'Ordinary question'}))
 
     def test_allow_block_and_stop_delimiter_are_preserved(self):
         for text in ('<severity>2</severity>', '<severity>72</severity><category>Data Exfiltration</category>',
@@ -229,6 +234,50 @@ class GatewayCompatibilityTests(unittest.TestCase):
             self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':text}])
             self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
             self.assert_idle()
+
+    def test_streaming_classifier_validates_before_delivering_a_verdict(self):
+        for text in ('<block>no</block>', '<block>yes</block>'):
+            self.reply([{'type':'thinking','thinking':'Synthetic reasoning'},{'type':'text','text':text}])
+            status,headers,raw=self.request('POST','/v1/messages',
+                {**review(),'stop_sequences':['</block>'],'stream':True})
+            self.assertEqual(status,200)
+            self.assertIn('text/event-stream',{k.lower():v for k,v in headers.items()}['content-type'])
+            values=[json.loads(line[6:]) for line in raw.splitlines() if line.startswith(b'data: ')]
+            self.assertEqual(''.join(v.get('delta',{}).get('text','') for v in values),text)
+            self.assertEqual(values[-1]['type'],'message_stop')
+            self.assertNotIn(b'Synthetic reasoning',raw)
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
+        for text in ('<block>no', '<block>maybe</block>'):
+            self.reply([{'type':'text','text':text}])
+            status,headers,raw=self.request('POST','/v1/messages',
+                {**review(),'stop_sequences':['</block>'],'stream':True})
+            self.assertEqual(status,502)
+            self.assertEqual(dict(headers).get('x-should-retry'),'false')
+            self.assertNotIn(b'content_block_delta',raw)
+        self.assertEqual(len(base.Worker.seen),4)
+        self.assert_idle()
+
+    def test_classifier_stream_state_does_not_leak_to_the_next_request(self):
+        import http.client
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        headers={'Authorization':'Bearer api-password','Content-Type':'application/json'}
+        try:
+            self.reply([{'type':'text','text':'<block>no</block>'}])
+            connection.request('POST','/v1/messages',json.dumps(
+                {**review(),'stop_sequences':['</block>'],'stream':True}),headers)
+            response=connection.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertIn('text/event-stream',response.getheader('Content-Type'))
+            response.read()
+            self.reply([{'type':'text','text':'Ordinary answer'}])
+            connection.request('POST','/v1/messages',json.dumps(self.payload()),headers)
+            response=connection.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertIn('application/json',response.getheader('Content-Type'))
+            self.assertEqual(json.loads(response.read())['content'][0]['text'],'Ordinary answer')
+        finally:
+            connection.close()
+        self.assert_idle()
 
     def test_profile_uses_the_original_image_proxy_and_existing_account_slot(self):
         self.manager.worker_profiles_enabled=True
