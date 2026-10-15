@@ -116,7 +116,8 @@ def _forward(handler, admit, raw=None, standard=False):
         pending = queue.Queue(maxsize=128)
         incremental = None
         from web_tools.api import output_schema
-        if standard and request.get('stream') and not request.get('_citation_sources') and output_schema(request) is None:
+        strict_commit = any(t.get('strict') and not t.get('eager_input_streaming') for t in request.get('tools', []))
+        if standard and request.get('stream') and not strict_commit and not request.get('_citation_sources') and output_schema(request) is None:
             from web_tools.streaming import ToolStream
             incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
 

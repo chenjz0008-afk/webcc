@@ -45,6 +45,8 @@ class NativeEvents:
         if kind=='message_start':self.model=value['message'].get('model','unknown')
         if kind=='content_block_start':
             block=value['content_block'];self.blocks[index]=copy.deepcopy(block)
+            if block['type']=='thinking':
+                block.setdefault('signature','')
             if block['type']=='tool_use' and block.get('name') in {'web_search','web_fetch'}:
                 self.search_started |= block.get('name') == 'web_search'
                 value['content_block']={k:block[k] for k in ('id','name','input')};value['content_block']['type']='server_tool_use'

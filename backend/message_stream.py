@@ -47,7 +47,7 @@ def block_events(content, start=0):
         elif kind == 'thinking':
             value = block.pop('thinking', '')
             signature = block.pop('signature', None)
-            yield event('content_block_start', index=index, content_block={**block, 'thinking': ''})
+            yield event('content_block_start', index=index, content_block={**block, 'thinking': '', 'signature': ''})
             if value:
                 yield event('content_block_delta', index=index, delta={'type': 'thinking_delta', 'thinking': value})
             if signature is not None:

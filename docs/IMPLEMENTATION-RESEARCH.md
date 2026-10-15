@@ -192,3 +192,9 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 参考 [Anthropic 长任务工程实践](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) 的实际文件、版本、进度与回读验收；[上下文管理](https://platform.claude.com/docs/en/build-with-claude/context-windows) 明确上下文容量与压缩的区别。用户提供的 [StreamingToolExecutor 分析代码](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 用于对照工具 ID、执行与结果状态分离；协议以官方资料为准，不据分析仓库声称复刻官方隐藏状态。
 
 真实代理 `ProxyConnect` 错误与 JSON 校验失败分开处理。临时冷却在释放占用前记录，阻止后续请求马上再次选中已知故障出口；保留原三次连续失败隔离及代理出口限制。Python 编解码不是这轮秒级等待的已确认根因，不为此重写语言或调高模型并发。
+
+### 2026-10-15 · Thinking 流开始与严格工具交付
+
+65 轮真实耐久测试发现 Thinking 开始块缺少 signature，官方 Python SDK 严格验证会在 signature_delta 前拒绝。按官方 [ThinkingBlock](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/thinking_block.py) 和 [流协议](https://platform.claude.com/docs/en/build-with-claude/streaming) 保留开始块空 signature，再传签名增量，覆盖普通及工具适配路径。
+
+另一真实故障为完整工具 JSON 后再次生成 JSON。严格工具模式复用现有完整校验及有限纠正，先校验整段结果再交付，避免已发出调用后才发现无效尾部。普通增量和显式 eager 模式继续执行不重放边界；不把额外 JSON 当作可忽略噪声。

@@ -62,7 +62,7 @@ def request(client, messages, choice, tools=TOOLS):
     return response, timings, json.loads(json.dumps(body))
 
 
-def scenario(label, accounts, long_history=False, force=True):
+def scenario(label, accounts, long_history=False, force=True, extended=False):
     folder = ROOT / label
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     marker = 'TRADE-' + ROOT.name.upper() + '-' + label.upper()
@@ -89,6 +89,12 @@ def scenario(label, accounts, long_history=False, force=True):
         ('patch_record', 'Save quote.audit_marker as the original policy marker, using the version from the last actual read.'),
         ('read_record', 'Read quote again and verify its audit_marker and total.'),
     ]
+    if extended:
+        for number in range(1,49):
+            identity=f'shipment-{number:02d}'
+            documents[identity]={'version':1,'booking':f'BOOK-{number:04d}','sku':'B500','quantity':1000+number,
+                                 'shipping':650+number*10,'status':'approved' if number%2 else 'pending'}
+            steps.append(('read_record',f'Read {identity}. Retain its exact booking, quantity, shipping and approval status for the final overseas fulfillment summary.'))
     key = admin('POST', '/admin/api-keys', {'name': 'long-test-' + label, 'accounts': [accounts[0]], 'scopes': ['messages'], 'rpm': 1000,
                                          'expires_at': int(time.time())+1800})
     client = Anthropic(api_key=key['key'], base_url=BASE, timeout=150, max_retries=0,
@@ -101,7 +107,9 @@ def scenario(label, accounts, long_history=False, force=True):
                              {'role': 'assistant', 'content': 'Acknowledged. No external action taken.'}])
     begin = time.monotonic()
     try:
-        for turn, (name, instruction) in enumerate([*steps, ('none', 'Return only JSON with marker, total, available, certification, sent (boolean), conflict_recovered (boolean), missing_record (boolean). Use actual history, no tools.')]):
+        final_instruction='Return only JSON with marker, total, available, certification, sent (boolean), conflict_recovered (boolean), missing_record (boolean). Use actual history, no tools.'
+        if extended:final_instruction+=' Also include first_booking, last_quantity, last_shipping and approved_shipments count from all shipment records already read.'
+        for turn, (name, instruction) in enumerate([*steps, ('none', final_instruction)]):
             account = accounts[turn % len(accounts)]
             bind(key['id'], account if force else accounts)
             report['account_schedule'].append(account if force else list(accounts))
@@ -120,10 +128,13 @@ def scenario(label, accounts, long_history=False, force=True):
                 final = json.loads(text.strip().removeprefix('```json').removesuffix('```').strip())
                 assert final['marker'] == marker and float(final['total']) == 8650 and int(final['available']) == 3500
                 assert final['certification'] == 'unverified' and final['sent'] is False and final['conflict_recovered'] is True and final['missing_record'] is True
+                if extended:
+                    assert final['first_booking']=='BOOK-0001' and int(final['last_quantity'])==1048 and int(final['last_shipping'])==1130 and int(final['approved_shipments'])==24
                 report['final'] = final
                 continue
             assert len(calls) == 1 and calls[0].name == name and response.stop_reason == 'tool_use'
             call = calls[0]; arguments = call.input; identity = arguments['key']; doc = documents.get(identity)
+            if extended and turn>=16:assert identity==f'shipment-{turn-15:02d}'
             error = False
             if doc is None:
                 output = {'error': 'FileNotFoundError', 'key': identity}; error = True
@@ -176,7 +187,9 @@ def main():
     accounts = ready[:4]
     boundary_only = '--boundary' in sys.argv
     balanced = '--balanced' in sys.argv
-    if boundary_only:
+    if '--extended' in sys.argv:
+        rows=[scenario('extended-65-real-rounds',ready,force=False,extended=True)]
+    elif boundary_only:
         rows = [scenario('over-128-messages', ready if balanced else accounts, True, not balanced)]
     elif balanced:
         with concurrent.futures.ThreadPoolExecutor(4) as pool:
