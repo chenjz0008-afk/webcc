@@ -103,5 +103,22 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*self.agent.tasks)
         self.assertEqual(self.cluster.released, [('a', 'reservation')])
 
+    async def test_shutdown_waits_for_prewarming_before_closing_shared_state(self):
+        import threading
+        entered, finished = threading.Event(), threading.Event()
+        self.manager.worker_profiles_enabled = True
+        def maintain(manager, stopped):
+            entered.set()
+            self.assertTrue(stopped.wait(2))
+            finished.set()
+        def close():
+            self.assertTrue(finished.is_set())
+        self.cluster.close = close
+        app = self.agent.app()
+        with patch('worker_profiles.maintain', side_effect=maintain):
+            async with app.router.lifespan_context(app):
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+        self.assertTrue(finished.is_set())
+
 
 if __name__ == '__main__': unittest.main()

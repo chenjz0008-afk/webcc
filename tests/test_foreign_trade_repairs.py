@@ -157,6 +157,23 @@ class EnvelopeTests(unittest.TestCase):
         self.assertTrue(stream.failed)
         self.assertFalse(stream.emitted)
 
+    def test_confirmed_parameter_tail_is_framed_outside_json_only(self):
+        value={'calls':[{'name':'save','input':{'id':'中文quote','version':0}}],'text':'Keep </parameter> inside this text.'}
+        raw=json.dumps(value,ensure_ascii=False)
+        expected=parse_response(raw,TOOLS)
+        self.assertEqual(parse_response(raw+'</parameter>',TOOLS)['content'][-1],expected['content'][-1])
+        for width in (1,7,len(raw)+12):
+            output=[];stream=ToolStream(types.SimpleNamespace(), 'owner', {'tools':TOOLS,'messages':[]},output.append)
+            full=raw+'</parameter>'
+            for offset in range(0,len(full),width):
+                stream.upstream({'type':'content_block_delta','delta':{'type':'text_delta','text':full[offset:offset+width]}})
+            stream.finish({**expected,'usage':{'output_tokens':1}})
+            self.assertFalse(stream.failed)
+            self.assertEqual(b''.join(output).count(b'event: content_block_start'),2)
+            self.assertIn(b'message_stop',b''.join(output))
+        for tail in ('</parameter></parameter>','{"calls":[],"text":"other"}',' trailing','</param'):
+            with self.subTest(tail=tail),self.assertRaises(ValueError):parse_response(raw+tail,TOOLS)
+
     def test_incremental_final_mismatch_cannot_complete(self):
         stream = self.check_stream({'calls': [{'name': 'save', 'input': {'id': '中文quote', 'version': 0}}], 'text': ''})
         with self.assertRaises(Exception):

@@ -92,14 +92,14 @@ def _forward(handler, admit, raw=None, standard=False):
         if not attempted:
             handler.check_caller()
         alive()
-    for _ in range(handler.manager.retry_attempts):
+    for attempt in range(handler.manager.retry_attempts):
         alive()
         try:
             account = handler.manager.acquire(exclude=attempted, request_deadline=handler.request_deadline,
                                                on_wait=waiting, allowed=handler.allowed_accounts,
                                                profile='client-tools' if handler.manager.worker_profiles_enabled else None)
         except Problem as problem:
-            if not attempted:
+            if attempt == 0:
                 last = (problem.status, 'rate_limit_error' if problem.status == 429 else 'api_error',
                         'Account queue wait limit reached; retry later' if problem.status == 429 else 'No eligible account is available')
             break
@@ -116,7 +116,8 @@ def _forward(handler, admit, raw=None, standard=False):
         pending = queue.Queue(maxsize=128)
         incremental = None
         from web_tools.api import output_schema
-        if standard and request.get('stream') and not request.get('_citation_sources') and output_schema(request) is None:
+        strict_commit = any(t.get('strict') and not t.get('eager_input_streaming') for t in request.get('tools', []))
+        if standard and request.get('stream') and not strict_commit and not request.get('_citation_sources') and output_schema(request) is None:
             from web_tools.streaming import ToolStream
             incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
 
@@ -146,6 +147,10 @@ def _forward(handler, admit, raw=None, standard=False):
                 from upstream_message import read
                 raw = response.read(1048576) if response.status >= 400 else read(response, thinking=standard, on_event=progress if incremental else None)
                 result['body'] = raw
+                from worker_errors import proxy_connect
+                if proxy_connect(response.status, raw):
+                    handler.manager.record_failure(account, 'proxy_connect', response.status)
+                    result['proxy_failure_recorded'] = True
             except Exception as exc:
                 result['failure'] = type(exc).__name__
             finally:
@@ -240,6 +245,9 @@ def _forward(handler, admit, raw=None, standard=False):
                         {'role': 'user', 'content': 'The previous reply failed validation: ' + json.dumps(problem.feedback or {}, ensure_ascii=False) +
                          '. Fix every listed issue using the declared schemas and original task. Missing and unexpected property names must be corrected, not repeated. Input property names must match input_schema exactly, with no added spaces. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
                     body = json.dumps(upstream, ensure_ascii=False).encode()
+                # A format error is not an account fault; a scoped single account
+                # can correct it before any content or executable call is delivered.
+                attempted.discard(account['id'])
                 continue
             alive()
             if sent:
@@ -257,7 +265,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 handler.respond(200, message)
             handler.manager.record_success(account)
             return
-        if status in (401, 403, 429) or status >= 500:
+        if (status in (401, 403, 429) or status >= 500) and not result.get('proxy_failure_recorded'):
             category = 'transport:' + result['failure'] if result.get('failure') else 'upstream_http:' + str(status)
             handler.manager.record_failure(account, category, status, result.get('retry_after'))
         if status == 400:

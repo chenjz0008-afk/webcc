@@ -94,6 +94,60 @@ class ClusterTests(unittest.TestCase):
         self.assertTrue(self.a.release('a', token))
         self.assertTrue(self.b.reserve('a', 'node-2', 4))
 
+    def test_active_prewarm_is_exclusive_and_cannot_dispatch_model_work(self):
+        token = self.a.reserve('a', 'node-1', 4, background=True, kind='prewarm')
+        self.assertTrue(token)
+        self.assertEqual(self.b.reap_prewarm(), 0)
+        self.assertIsNone(self.b.reserve('a', 'node-2', 4))
+        self.assertFalse(self.b.claim('a', token))
+        self.assertTrue(self.a.release('a', token))
+
+    def test_dead_prewarm_owner_is_reaped_but_request_ownership_is_preserved(self):
+        state = self.a.load(); state['accounts']['b'] = {'id': 'b', 'status': 'ready'}; self.a.save(state)
+        warm = self.a.reserve('a', 'node-1', 4, kind='prewarm')
+        request = self.a.reserve('b', 'node-1', 4)
+        self.assertTrue(warm); self.assertTrue(request)
+        self.a.pool.close()
+        import time
+        removed = 0
+        for _ in range(50):
+            removed += self.b.reap_prewarm()
+            if removed: break
+            time.sleep(.01)
+        self.assertEqual(removed, 1)
+        self.assertFalse(self.b.busy('a'))
+        self.assertTrue(self.b.busy('b'))
+        self.assertTrue(self.b.reserve('a', 'node-2', 4))
+        self.assertTrue(self.b.release('b', request))
+
+    def test_reused_backend_pid_does_not_keep_an_orphan_prewarm(self):
+        token = self.a.reserve('a', 'node-1', 4, kind='prewarm')
+        self.assertTrue(token)
+        with self.a.pool.connection() as db:
+            db.execute("UPDATE webcc_occupancy SET owner_started_at=owner_started_at-interval '1 day' WHERE token=%s", (token,))
+        self.assertEqual(self.b.reap_prewarm(), 1)
+
+    def test_sigkill_recovery_only_releases_prewarm(self):
+        import select, time
+        state = self.a.load(); state['accounts']['b'] = {'id': 'b', 'status': 'ready'}; self.a.save(state)
+        code = "import os,time; from cluster_state import ClusterState; c=ClusterState(os.environ['WEBCC_CLUSTER_TEST_URL']); assert c.reserve('a','node-1',4,kind='prewarm'); assert c.reserve('b','node-1',4); print('ready',flush=True); time.sleep(30)"
+        child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(select.select([child.stdout], [], [], 10)[0])
+            self.assertEqual(child.stdout.readline(), b'ready\n')
+            child.kill(); child.wait(5)
+            removed = 0
+            for _ in range(50):
+                removed += self.b.reap_prewarm()
+                if removed: break
+                time.sleep(.01)
+            self.assertEqual(removed, 1)
+            self.assertFalse(self.b.busy('a'))
+            self.assertTrue(self.b.busy('b'))
+        finally:
+            if child.poll() is None: child.kill(); child.wait(5)
+            child.stdout.close(); child.stderr.close()
+
     def test_agent_can_claim_each_reservation_only_once(self):
         token = self.a.reserve('a', 'node-1', 4)
         self.assertFalse(self.b.claim('a', 'wrong-token'))

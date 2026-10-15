@@ -176,3 +176,27 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 浏览器协议依据 [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)：仅公开 `/v1/` 和 `/code/v1/` API 返回跨域头，预检限制方法与请求头；不开放管理接口，不允许 cookie 凭据。实际请求仍验证用户密钥与权限；预检不分配账号、不调用上游。响应头在统一出口添加，涵盖错误与 SSE，不引入额外服务。
 
 真实 CLI 合成天气搜索和只读计算的三次快速审批都被正确识别，均返回有效判断。历史截图时段仍有空正文与无会话异常，现有日志不足以将它们与具体审批请求关联。补充结构诊断记录请求上限、Thinking 开关、审批识别、实际停止原因、内容块类型及字符长度，不记录正文、签名、用户路径或密钥；移除未证实的“可能达到输出限制”错误描述。
+## 2026-10-14 · 工具配置预热与生命周期
+
+依据 [Docker 端口发布](https://docs.docker.com/reference/cli/docker/container/run/) 使用 `127.0.0.1::8484` 让 Docker 原子选择端口，读取真实绑定并验证回环地址；保留原版镜像、代理网络及账号配置副本。每账号使用稳定的 [flock](https://docs.python.org/3/library/fcntl.html) 文件，回收非阻塞获取同一把锁并再次核对账号租约；锁文件在账号目录生命周期内保留，避免删除锁文件产生不同 inode 的竞争。等待就绪不阻塞其他账号，半完成启动状态和旧 manifest 可以恢复，启动失败清理副本。
+
+后台预热复用 PostgreSQL/Redis 账号租约与队列，不计业务派发；按节点保留小池，内存门槛使用 320/256 MiB 滞回，避免内存边缘反复启停。远程就绪提示是有 TTL 的优化信息，通过单次 Redis MGET 获取，不替代权限、租约或运行状态检查。节点退出先停止维护并等当前预热结束，再关闭共享状态连接。复用现有线程/asyncio，不新增服务或依赖。
+
+预热不执行模型或业务工具，因此使用独立占位类型，绑定 PostgreSQL backend PID 与 backend_start。启动及维护通过 pg_stat_activity 仅回收已无对应连接的预热占位，PID 复用时仍可识别。正常请求占位不能靠年龄自动释放；预热占位也不能被节点 claim 为模型任务。增加连接关闭、SIGKILL、普通占位保护和 PID 复用的真实独立数据库验收。
+### 2026-10-15 · 长任务与账号交接
+
+先以真实上游复现 133 条历史被网关拦截、官方 SDK 完整序列化回传被拒、工具 Schema 更新重判旧调用、格式纠正排除唯一账号，以及合法 JSON 后追加 `</parameter>` 引发流式失败。合成测试原文与服务器工具结果留在仓库外；不把输出 HTTP 200 当作业务成功。
+
+协议依据为 [官方 Messages SDK 的历史工具块定义](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/tool_use_block_param.py) 和 [SDK 响应模型的默认空字段](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/tool_use_block.py)。复用现有 JSON Schema、ijson/jiter、PostgreSQL 租约，不引入宽松 JSON 修补器、第二套会话数据库或隐藏摘要。严格解析一个 JSON 文档，仅兼容已观测的外部尾标记；字符串、工具参数和历史保持原样。未交付时允许有界纠正，交付后不自动重放。
+
+参考 [Anthropic 长任务工程实践](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) 的实际文件、版本、进度与回读验收；[上下文管理](https://platform.claude.com/docs/en/build-with-claude/context-windows) 明确上下文容量与压缩的区别。用户提供的 [StreamingToolExecutor 分析代码](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts) 用于对照工具 ID、执行与结果状态分离；协议以官方资料为准，不据分析仓库声称复刻官方隐藏状态。
+
+真实代理 `ProxyConnect` 错误与 JSON 校验失败分开处理。临时冷却在释放占用前记录，阻止后续请求马上再次选中已知故障出口；保留原三次连续失败隔离及代理出口限制。Python 编解码不是这轮秒级等待的已确认根因，不为此重写语言或调高模型并发。
+
+### 2026-10-15 · Thinking 流开始与严格工具交付
+
+65 轮真实耐久测试发现 Thinking 开始块缺少 signature，官方 Python SDK 严格验证会在 signature_delta 前拒绝。按官方 [ThinkingBlock](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/thinking_block.py) 和 [流协议](https://platform.claude.com/docs/en/build-with-claude/streaming) 保留开始块空 signature，再传签名增量，覆盖普通及工具适配路径。
+
+另一真实故障为完整工具 JSON 后再次生成 JSON。严格工具模式复用现有完整校验及有限纠正，先校验整段结果再交付，避免已发出调用后才发现无效尾部。普通增量和显式 eager 模式继续执行不重放边界；不把额外 JSON 当作可忽略噪声。
+
+公网严格 SDK 测试进一步发现网页 thinking_summary_delta 不是标准增量类型。共享 upstream_message.normalize_event 将真实 summary.summary 字符串转换为 thinking_delta；普通 NativeEvents 和工具上游读取复用，内容不丢弃，后续平台签名覆盖标准化后的真实内容。回归保存实际失败样本；不把摘要称为隐藏完整推理。

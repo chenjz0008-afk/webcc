@@ -78,6 +78,64 @@ class StandardToolsTests(unittest.TestCase):
         request,_=prepare(json.dumps(fields),standard=True)
         self.assertEqual(request['messages'],fields['messages'])
 
+    def test_long_standard_history_keeps_old_results_and_latest_state(self):
+        fields=self.fields()
+        history=fields['messages']
+        for index in range(260):
+            history.extend([
+                {'role':'assistant','content':[{'type':'thinking','thinking':f'State {index}','signature':f'signature-{index}'},
+                    {'type':'tool_use','id':f'call-{index}','name':'add','input':{'a':index}}]},
+                {'role':'user','content':[{'type':'tool_result','tool_use_id':f'call-{index}',
+                    'content':f'version={index}; value={index+1}', 'is_error':index==40}]},
+            ])
+        request,body=prepare(json.dumps(fields),standard=True)
+        forwarded=json.loads(json.loads(body)['messages'][0]['content'])['history']
+        self.assertEqual(forwarded,history)
+        self.assertEqual(request['messages'],history)
+        malformed=json.loads(json.dumps(fields))
+        malformed['messages'][-1]['content'][0]['tool_use_id']='call-0'
+        with self.assertRaises(ValueError):prepare(json.dumps(malformed),standard=True)
+
+    def test_long_history_still_has_byte_and_experimental_limits(self):
+        from web_files import FileProblem
+        from web_tools.history import MAX_BYTES,check_history
+        fields=self.fields()
+        history=[{'role':'user' if i%2==0 else 'assistant','content':'checkpoint'} for i in range(133)]
+        fields['messages']=history
+        prepare(json.dumps(fields),standard=True)
+        with self.assertRaises(ValueError):check_history(history,fields['tools'])
+        fields['messages'][0]['content']='x'*MAX_BYTES
+        with self.assertRaises(FileProblem) as raised:prepare(json.dumps(fields),standard=True)
+        self.assertEqual(raised.exception.status,413)
+
+    def test_sdk_full_dump_and_direct_caller_survive_history_roundtrip(self):
+        from anthropic.types import ToolUseBlock
+        fields=self.fields()
+        call=ToolUseBlock(type='tool_use',id='sdk-call',name='add',input={'a':1}).model_dump()
+        fields['messages'].extend([{'role':'assistant','content':[call]},
+            {'role':'user','content':[{'type':'tool_result','tool_use_id':'sdk-call','content':'2'}]}])
+        for caller in (None,{'type':'direct'}):
+            call['caller']=caller
+            request,_=prepare(json.dumps(fields),standard=True)
+            self.assertEqual(request['messages'],fields['messages'])
+        for caller in ('direct',{'type':'direct','unexpected':True}):
+            call['caller']=caller
+            with self.assertRaises(ValueError):prepare(json.dumps(fields),standard=True)
+
+    def test_changed_or_deferred_definitions_do_not_reinterpret_completed_history(self):
+        fields=self.fields()
+        fields['messages'].extend([{'role':'assistant','content':[{'type':'tool_use','id':'old-call','name':'add','input':{'a':1}}]},
+            {'role':'user','content':[{'type':'tool_result','tool_use_id':'old-call','content':'2'}]}])
+        fields['tools'][0]['input_schema']['required'].append('revision')
+        fields['tools'][0]['input_schema']['properties']['revision']={'type':'integer'}
+        for deferred in (False,True):
+            fields['tools'][0]['defer_loading']=deferred
+            if deferred:fields['tools'].append({'name':'discover','input_schema':{'type':'object','properties':{}}})
+            request,_=prepare(json.dumps(fields),standard=True)
+            self.assertEqual(request['messages'],fields['messages'])
+        from web_tools import parse_response
+        with self.assertRaises(Exception):parse_response('{"calls":[{"name":"add","input":{"a":1}}],"text":""}',fields['tools'])
+
     def test_chat_developer_updates_keep_their_position(self):
         from openai_tools import convert
         fields=convert({'model':'fixture','max_tokens':100,'messages':[

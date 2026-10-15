@@ -67,7 +67,8 @@ class FakeManager(Manager):
         if command == "run":
             name = args[args.index("--name") + 1]
             self.containers[name] = {"State": {"Running": True, "Status": "running"},
-                                      "Mounts": [{"Source": "/private/data", "Destination": "/etc/clewdr", "RW": True}], "Image": "sha256:image"}
+                                      "Mounts": [{"Source": "/private/data", "Destination": "/etc/clewdr", "RW": True}], "Image": "sha256:image",
+                                      "NetworkSettings": {"Ports": {"8484/tcp": [{"HostIp": "127.0.0.1", "HostPort": str(self.worker_port)}]}}}
             return name
         if command == "inspect":
             if args[1] not in self.containers:

@@ -17,6 +17,45 @@ def manager():
 
 
 class StateAndCacheTests(unittest.TestCase):
+    def test_thinking_stream_passes_strict_sdk_validation(self):
+        import httpx2 as httpx
+        from anthropic import Anthropic
+        thought=seal(manager(),'owner',{'type':'thinking','thinking':'','summaries':[],
+                    'truncated':True,'stop_timestamp':None},'actual-model')
+        message={'id':'msg_fixture','type':'message','role':'assistant','model':'actual-model',
+                 'content':[thought,{'type':'text','text':'Actual answer'}],
+                 'stop_reason':'end_turn','stop_sequence':None,'usage':{'input_tokens':1,'output_tokens':2}}
+        transport=httpx.MockTransport(lambda request:httpx.Response(200,
+            headers={'content-type':'text/event-stream'},content=b''.join(events(message))))
+        with Anthropic(api_key='fixture',http_client=httpx.Client(transport=transport),
+                       _strict_response_validation=True,max_retries=0) as client:
+            with client.messages.stream(model='actual-model',max_tokens=32,messages=[{'role':'user','content':'Hi'}]) as stream:
+                list(stream)
+                result=stream.get_final_message()
+        self.assertEqual(result.content[0].signature,thought['signature'])
+        self.assertEqual(result.content[1].text,'Actual answer')
+        from native_events import NativeEvents
+        native=NativeEvents(manager(),'owner')
+        start={'type':'content_block_start','index':0,'content_block':{'type':'thinking','thinking':'','truncated':True}}
+        framed=native.frame(start)
+        block=json.loads(framed[0].split(b'data: ',1)[1])['content_block']
+        self.assertEqual(block['signature'],'')
+        self.assertNotIn('signature',start['content_block'])
+
+    def test_web_thinking_summary_is_a_standard_delta_in_both_paths(self):
+        from native_events import NativeEvents
+        from upstream_message import normalize_event
+        value={'type':'content_block_delta','index':0,'delta':{'type':'thinking_summary_delta',
+               'summary':{'summary':'Determining whether an uploaded file counts as a user instruction.'}}}
+        normalized=normalize_event(value)
+        self.assertEqual(normalized['delta'],{'type':'thinking_delta','thinking':value['delta']['summary']['summary']})
+        native=NativeEvents(manager(),'owner')
+        native.frame({'type':'content_block_start','index':0,'content_block':{'type':'thinking','thinking':''}})
+        framed=json.loads(native.frame(value)[0].split(b'data: ',1)[1])
+        self.assertEqual(framed,normalized)
+        self.assertEqual(native.blocks[0]['thinking'],normalized['delta']['thinking'])
+        with self.assertRaises(ValueError):normalize_event({**value,'delta':{'type':'thinking_summary_delta','summary':None}})
+
     def test_thinking_owner_integrity_expiry_and_native_signature(self):
         m=manager();original={'type':'thinking','thinking':'Actual upstream summary','start_timestamp':None}
         signed=seal(m,'owner',original,'actual-model')
@@ -80,6 +119,8 @@ class IncrementalTests(unittest.TestCase):
         frames=[json.loads(line[6:]) for line in b''.join(output).splitlines() if line.startswith(b'data: ')]
         text=''.join(e.get('delta',{}).get('text','') for e in frames)
         self.assertEqual(text,'北区\n预算!')
+        thought=next(e['content_block'] for e in frames if e['type']=='content_block_start' and e['content_block']['type']=='thinking')
+        self.assertEqual(thought['signature'],'')
         signature=next(e['delta']['signature'] for e in frames if e.get('delta',{}).get('type')=='signature_delta')
         verify(manager(),'owner',{'messages':[{'content':[{'type':'thinking','thinking':'Actual summary','signature':signature}]}]})
 
@@ -194,6 +235,78 @@ class GatewayIncrementalTests(unittest.TestCase):
         self.assertEqual(feedback['path'],['calls',0,'input','id']);self.assertEqual(feedback['rule'],'enum')
         self.assertEqual(feedback['issues'][0]['path'],feedback['path'])
         self.assertEqual(first['status'],'ready');self.assert_idle()
+
+    def test_scoped_single_account_can_correct_strict_stream_arguments(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        account=self.manager.get_account(self.identity)
+        key=self.manager.api_keys.create({'name':'one account','accounts':[self.identity],'scopes':['messages']})
+        original=Worker.do_POST
+        def replies(worker):
+            value={'calls':[{'name':'read','input':{'id':'invalid'}}],'text':''} if not Worker.seen else {'calls':[{'name':'read','input':{'id':'A'}}],'text':''}
+            Worker.replies['Bearer '+account['key']]=(200,raw_output(value))
+            original(worker)
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'stream':True,'tools':[{**t,'strict':True} for t in TOOLS],
+              'messages':[{'role':'user','content':'Read A'}]}
+        with patch.object(Worker,'do_POST',replies):status,_,raw=self.request('POST','/v1/messages',body,key=key['key'])
+        self.assertEqual(status,200)
+        self.assertEqual(len(Worker.seen),2)
+        self.assertNotIn(b'event: error',raw)
+        self.assertEqual(raw.count(b'event: content_block_start'),1)
+        self.assertIn(b'message_stop',raw)
+        self.assertEqual(account['status'],'ready');self.assert_idle()
+
+    def test_strict_duplicate_envelope_is_corrected_before_tool_delivery(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        account=self.manager.get_account(self.identity)
+        key=self.manager.api_keys.create({'name':'one account','accounts':[self.identity],'scopes':['messages']})
+        original=Worker.do_POST
+        def replies(worker):
+            raw=raw_output()
+            if not Worker.seen:
+                payload=json.loads(raw)
+                payload['content'][0]['text']+='</parameter>{"calls":[{'
+                raw=json.dumps(payload).encode()
+            Worker.replies['Bearer '+account['key']]=(200,raw)
+            original(worker)
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'stream':True,'tools':[{**t,'strict':True} for t in TOOLS],
+              'messages':[{'role':'user','content':'Read A'}]}
+        with patch.object(Worker,'do_POST',replies):status,_,raw=self.request('POST','/v1/messages',body,key=key['key'])
+        self.assertEqual(status,200);self.assertEqual(len(Worker.seen),2)
+        self.assertNotIn(b'event: error',raw)
+        self.assertEqual(raw.count(b'event: content_block_start'),1)
+        self.assertIn(b'message_stop',raw);self.assert_idle()
+
+    def test_scoped_format_repair_is_bounded_and_does_not_quarantine(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        account=self.manager.get_account(self.identity)
+        Worker.replies['Bearer '+account['key']]=(200,raw_output({'calls':[{'name':'read','input':{'id':'invalid'}}],'text':''}))
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'messages':[{'role':'user','content':'Read A'}]}
+        status,_,raw=self.request('POST','/v1/messages',body)
+        self.assertEqual(status,502)
+        self.assertEqual(len(Worker.seen),self.manager.retry_attempts)
+        self.assertEqual(json.loads(raw)['error']['code'],'output_validation_failed')
+        self.assertEqual(account['status'],'ready');self.assert_idle()
+
+    def test_proxy_connect_cools_before_release_and_keeps_history_on_failover(self):
+        from test_web_gateway import Worker,TOOLS,raw_output
+        first=self.manager.get_account(self.identity)
+        second=self.manager.add({'name':'second','sessionKey':'sk-ant-sid02-'+'B'*100+'-ABCDEF'+'AA','proxy':'127.0.0.1:1080:u:p'})
+        Worker.replies['Bearer '+first['key']]=(500,json.dumps({'error':{'type':'wreq_error','message':'Failed to bootstrap: client error (ProxyConnect)'}}).encode())
+        Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,raw_output())
+        original=self.manager.release;checked=[]
+        def release(account):
+            if account['id']==self.identity:
+                self.assertGreater(account['cooldown_until'],time.time());checked.append(True)
+            original(account)
+        body={'model':'claude-sonnet-4-6','max_tokens':2048,'tools':TOOLS,'messages':[{'role':'user','content':'Read A'}]}
+        with patch.object(self.manager,'release',release):status,_,raw=self.request('POST','/v1/messages',body)
+        self.assertEqual(status,200);self.assertEqual(checked,[True])
+        self.assertEqual(len(Worker.seen),2);self.assertEqual(Worker.seen[0]['body'],Worker.seen[1]['body'])
+        self.assertEqual(first['consecutive_failures'],1);self.assertEqual(first['status'],'ready')
+        self.request('POST','/v1/messages',body)
+        self.assertEqual(Worker.seen[-1]['headers']['Authorization'],'Bearer '+self.manager.get_account(second)['key'])
+        self.manager.record_failure(first,'proxy_connect',500);self.manager.record_failure(first,'proxy_connect',500)
+        self.assertEqual(first['status'],'quarantined');self.assert_idle()
 
 class SourceGuards(unittest.TestCase):
     def test_source_fetch_never_falls_back_to_direct_and_rejects_private_dns(self):
