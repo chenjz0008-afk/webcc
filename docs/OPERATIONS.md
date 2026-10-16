@@ -202,6 +202,14 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 
 ### Claude Code 的 auto 与 bypassPermissions
 
+Claude Code 2.1.296 的交互会话可能请求原生服务端安全判定：发送 safeguards，等待 safeguard_results。网页账号通道未提供该原生能力，不能用普通工具调用或单独分类请求的通过结果代替。按官方建议，在客户端现有 env 配置中加入以下设置，并新开会话：
+
+```json
+{"CLAUDE_CODE_AUTO_MODE_SERVER": "0"}
+```
+
+也可用 `CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --permission-mode auto` 临时验证。此设置保留 auto 的客户端分类审批，不是 bypass，不放开代理或权限。仅设置在服务器环境文件中不能影响远端客户端。该变量是官方临时配置，升级 CLI 后应重新核对。[官方说明](https://code.claude.com/docs/en/auto-mode-classifier-billing#make-the-session-eligible)。
+
 auto 审批按完整安全监控协议识别，接受 JSON 和 SSE 请求，复用原审批执行配置。短审批必须取得完整、有效的真实判定后才能交付；SSE 在校验后发送，不代表判定过程的实时增量。空回复、截断和无效判定不会变成放行；普通聊天流式保持原路径。同一 HTTP 长连接上的请求分别初始化审批状态。
 
 bypassPermissions 跳过客户端工具审批，不需要也不会由网关伪造放行。认证、资源隔离、代理出口和工具自身的网络检查仍生效。WebFetch 的域名安全检查与 auto 分类器是不同环节；切换 bypass 不能保证解决域名检查、代理白名单或站点读取失败。诊断时应分别保存审批回复、工具结果与最后正文，不能只以 CLI 退出码为零认定整个任务通过。

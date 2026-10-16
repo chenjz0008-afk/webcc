@@ -6,6 +6,8 @@
 
 普通 Messages 保留请求扩展、Beta 参数及上游返回的 Thinking、签名、工具块和缓存字段。平台适配须逐项完成真实验收。HTTP 200、字段透传和功能生效是三种不同的结论。
 
+Claude Code 的原生服务端安全判定（safeguards / safeguard_results）未实现，不能因普通工具及独立分类器通过就宣称支持。使用网页通道时，客户端按官方说明设置 CLAUDE_CODE_AUTO_MODE_SERVER=0，继续执行客户端 auto 审批；不得伪造服务端判定。[配置与边界](OPERATIONS.md#claude-code-的-auto-与-bypasspermissions)。
+
 ## 实现顺序
 
 | 内容 | 实现路线 | 验收门槛 |

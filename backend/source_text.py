@@ -67,11 +67,19 @@ def fetch(url):
                         size+=len(part)
                         if size>2097152:raise FileProblem(413,'Source page exceeds 2 MiB')
                         parts.append(part)
-                    if response.headers.get('content-type', '').split(';')[0].strip().lower() == 'text/plain':
+                    media = response.headers.get('content-type', '').split(';')[0].strip().lower()
+                    is_json = media == 'application/json' or media.startswith('application/') and media.endswith('+json')
+                    if media == 'text/plain' or is_json:
                         raw = b''.join(parts)
                         if len(raw) > 262144:
                             raise FileProblem(413, 'Source text exceeds 256 KiB')
-                        return {'url': url, 'text': raw.decode('utf-8-sig', errors='replace')}
+                        try:
+                            content = raw.decode('utf-8-sig', errors='strict' if is_json else 'replace')
+                            if is_json:
+                                json.loads(content)
+                        except (ValueError, RecursionError):
+                            raise FileProblem(502, 'Source returned invalid JSON') from None
+                        return {'url': url, 'text': content}
                     if not PARSE_SLOT.acquire(timeout=2):raise FileProblem(429, 'Source extraction is busy')
                     try:
                         result=subprocess.run([sys.executable,'-I',str(Path(__file__).with_name('html_text.py'))],input=b''.join(parts),capture_output=True,timeout=6,cwd='/tmp',env={})

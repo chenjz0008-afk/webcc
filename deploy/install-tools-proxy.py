@@ -43,7 +43,7 @@ def install():
         username, password = unquote(parsed.username), unquote(parsed.password or '')
         if re.search(r'[\s:@]', username + password): raise RuntimeError('Proxy credentials contain unsupported Tinyproxy config delimiters')
         credentials = username + ':' + password + '@'
-    domains = os.environ.get('MANAGER_CURL_DOMAINS', 'docs.python.org,github.com,api.github.com,raw.githubusercontent.com,codeload.github.com,trade.ec.europa.eu,httpbin.org,api.search.brave.com,165.154.205.213').split(',')
+    domains = os.environ.get('MANAGER_CURL_DOMAINS', 'docs.python.org,github.com,api.github.com,raw.githubusercontent.com,codeload.github.com,trade.ec.europa.eu,httpbin.org,api.search.brave.com,claude.ai,api.anthropic.com,165.154.205.213').split(',')
     if any(not re.fullmatch(r'[a-zA-Z0-9.-]+', host) for host in domains): raise RuntimeError('Invalid curl domain whitelist')
     filters = root / 'allowed-domains'; filters.write_text('\n'.join('^' + re.escape(host) + '$' for host in domains) + '\n')
     config = root / 'tinyproxy.conf'
