@@ -1119,14 +1119,16 @@ class Handler(BaseHTTPRequestHandler):
         body = self.body() if self.command == "POST" else None
         self.classifier_request = False
         self.classifier_stream_requested = False
+        self.client_auxiliary_request = False
         if body:
             try:
                 payload = json.loads(body)
             except (ValueError, RecursionError):
                 payload = None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                from auxiliary_requests import is_classifier, full_review, prepare as prepare_classifier
+                from auxiliary_requests import is_classifier, is_cli_auxiliary, full_review, prepare as prepare_classifier
                 self.classifier_request = is_classifier(payload)
+                self.client_auxiliary_request = is_cli_auxiliary(payload)
                 self.request_shape = {'max_tokens': payload.get('max_tokens') if type(payload.get('max_tokens')) is int else None, 'stream': bool(payload.get('stream')),
                                       'thinking_disabled': payload.get('thinking') == {'type': 'disabled'},
                                       'classifier': self.classifier_request}
@@ -1201,7 +1203,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline,
                                                on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts,
-                                               profile='client-tools' if self.classifier_request and self.manager.worker_profiles_enabled else None)
+                                               profile='client-tools' if (self.classifier_request or self.client_auxiliary_request) and self.manager.worker_profiles_enabled else None)
             except Problem:
                 if failure is None:
                     raise
@@ -1221,7 +1223,7 @@ class Handler(BaseHTTPRequestHandler):
     def forward_attempt(self, account, body):
         try:
             connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())),
-                profile='client-tools' if getattr(self, 'classifier_request', False) and self.manager.worker_profiles_enabled else None)
+                profile='client-tools' if (getattr(self, 'classifier_request', False) or getattr(self, 'client_auxiliary_request', False)) and self.manager.worker_profiles_enabled else None)
         except Problem:
             self.manager.release(account)
             return 503, '账号执行配置暂不可用'

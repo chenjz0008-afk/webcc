@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 import test_manager as base
-from auxiliary_requests import is_classifier, prepare, validate
+from auxiliary_requests import is_classifier, is_cli_auxiliary, prepare, validate
 from web_tools.api import complete, prepare as prepare_tools, OutputProblem
 from worker_profiles import endpoint
 
@@ -34,6 +34,17 @@ def stream(blocks, reason='end_turn'):
 
 
 class ReviewTests(unittest.TestCase):
+    def test_cli_auxiliary_requires_both_system_markers_and_no_client_tools(self):
+        markers=[{'type':'text','text':'x-anthropic-billing-header: cc_version=2.1.296.test; cc_entrypoint=cli;'},
+                 {'type':'text','text':"You are Claude Code, Anthropic's official CLI for Claude."}]
+        fields={'system':markers,'messages':[{'role':'user','content':'Summarize this page'}]}
+        self.assertTrue(is_cli_auxiliary(fields))
+        for changes in ({'system':markers[:1]},{'system':markers[1:]},
+                        {'system':None},{'system':'Ordinary instructions'},
+                        {'tools':[{'name':'read'}]},
+                        {'system':[], 'messages':[{'role':'user','content':str(markers)}]}):
+            self.assertFalse(is_cli_auxiliary({**fields,**changes}))
+
     def test_full_review_recognition_and_verdicts_preserve_policy(self):
         fields=full_review_request();self.assertTrue(is_classifier(fields))
         self.assertEqual(prepare(fields)['max_tokens'],8192)
@@ -122,6 +133,20 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def reply(self, blocks, reason='end_turn'):
         key='Bearer '+self.manager.get_account(self.identity)['key']
         base.Worker.replies[key]=(200,stream(blocks,reason),'text/event-stream')
+
+    def test_cli_auxiliary_uses_the_existing_client_profile_without_changing_plain_messages(self):
+        self.manager.worker_profiles_enabled=True
+        markers=[{'type':'text','text':'x-anthropic-billing-header: cc_version=2.1.296.test; cc_entrypoint=cli;'},
+                 {'type':'text','text':"You are Claude Code, Anthropic's official CLI for Claude."}]
+        for system,profile in [(markers,'client-tools'),('Ordinary chat',None)]:
+            self.reply([{'type':'text','text':'Actual page summary'}])
+            with patch.object(self.manager,'worker_connection',wraps=self.manager.worker_connection) as connection:
+                status,_,raw=self.request('POST','/v1/messages',{**self.payload(),'system':system})
+            self.assertEqual(status,200)
+            self.assertEqual(connection.call_args.kwargs['profile'],profile)
+            self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':'Actual page summary'}])
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['system'],system)
+            self.assert_idle()
 
     def test_full_review_uses_existing_classifier_profile_and_preserves_verdict(self):
         for text in ('<thinking>Synthetic review</thinking><block>no</block>',
