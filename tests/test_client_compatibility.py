@@ -208,6 +208,63 @@ class GatewayCompatibilityTests(unittest.TestCase):
         self.assertEqual(self.manager.get_account(self.identity).get('consecutive_failures',0),0)
         self.assert_idle()
 
+    def classifier_pool_failover(self, streaming):
+        second=base.ManagerTests.second_account(self)
+        first=self.manager.get_account(self.identity)
+        base.Worker.replies['Bearer '+first['key']]=(500,b'{"error":{"type":"no_cookie_available","code":500}}')
+        verdict='<severity>72</severity><category>Data Exfiltration</category>'
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':verdict}]),'text/event-stream')
+        status,_,raw=self.request('POST','/v1/messages',{**review(),'stream':streaming})
+        self.assertEqual(status,200)
+        if streaming:
+            values=[json.loads(line[6:]) for line in raw.splitlines() if line.startswith(b'data: ')]
+            actual=''.join(value.get('delta',{}).get('text','') for value in values)
+        else:actual=json.loads(raw)['content'][0]['text']
+        self.assertEqual(actual,verdict)
+        self.assertEqual(len(base.Worker.seen),2)
+        self.assertEqual(base.Worker.seen[0]['body'],base.Worker.seen[1]['body'])
+        self.assertNotEqual(base.Worker.seen[0]['headers']['Authorization'],base.Worker.seen[1]['headers']['Authorization'])
+        self.assertEqual(first.get('consecutive_failures',0),0)
+        self.assertGreater(first['cooldown_until'],__import__('time').time())
+        self.assert_idle()
+
+    def test_classifier_unavailable_session_switches_before_json_verdict(self):
+        self.classifier_pool_failover(False)
+
+    def test_classifier_unavailable_session_switches_before_streamed_verdict(self):
+        self.classifier_pool_failover(True)
+
+    def test_invalid_classifier_does_not_try_another_account_for_a_verdict(self):
+        second=base.ManagerTests.second_account(self)
+        self.reply([{'type':'text','text':'<severity>2'}])
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':'<severity>2</severity>'}]),'text/event-stream')
+        status,headers,_=self.request('POST','/v1/messages',review())
+        self.assertEqual(status,502)
+        self.assertEqual({k.lower():v for k,v in headers.items()}['x-should-retry'],'false')
+        self.assertEqual(len(base.Worker.seen),1)
+        self.assert_idle()
+
+    def test_classifier_retry_policy_resets_on_a_reused_http_connection(self):
+        import http.client
+        second=base.ManagerTests.second_account(self)
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        headers={'Authorization':'Bearer api-password','Content-Type':'application/json'}
+        try:
+            self.reply([{'type':'text','text':'<severity>2'}])
+            connection.request('POST','/v1/messages',json.dumps(review()),headers)
+            response=connection.getresponse();self.assertEqual(response.status,502);response.read()
+            first=self.manager.get_account(self.identity)
+            self.manager.last_used[self.identity]=0
+            self.manager.last_used[second]=1
+            base.Worker.replies['Bearer '+first['key']]=(500,b'{"error":{"type":"no_cookie_available","code":500}}')
+            base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':'<severity>2</severity>'}]),'text/event-stream')
+            connection.request('POST','/v1/messages',json.dumps(review()),headers)
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertIsNone(response.getheader('x-should-retry'));response.read()
+            self.assertEqual(len(base.Worker.seen),3)
+        finally:connection.close()
+        self.assert_idle()
+
     def test_hidden_thinking_cannot_complete_as_an_empty_success(self):
         for requested in (False, True):
             self.reply([{'type':'thinking','thinking':'Synthetic reasoning'}],reason='max_tokens')

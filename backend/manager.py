@@ -981,6 +981,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_request(self):
         self.request_id = uuid.uuid4().hex
         self.caller_key, self.allowed_accounts, self.retry_after, self.adapter = None, None, None, None
+        self.should_retry = True
         try:
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
@@ -1193,7 +1194,7 @@ class Handler(BaseHTTPRequestHandler):
             self.request_deadline = min(self.request_deadline, time.monotonic() + (45 if getattr(self, 'classifier_full', False) else 30))
         attempted = set()
         failure = None
-        for _ in range(1 if self.classifier_request else self.manager.retry_attempts):
+        for _ in range(self.manager.retry_attempts):
             if time.monotonic() >= self.request_deadline:
                 failure = (504, "请求处理超时")
                 break
@@ -1212,6 +1213,8 @@ class Handler(BaseHTTPRequestHandler):
             print(json.dumps({"event": "upstream_retry", "request_id": self.request_id,
                               "account_id": account["id"], "attempt": len(attempted),
                               "status": failure[0], "reason": failure[1]}), flush=True)
+            if not getattr(self, 'should_retry', True):
+                break
         status, message = failure
         self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": getattr(self, 'should_retry', True) and (status in {429, 502, 503, 504} or status >= 500)}})
 
