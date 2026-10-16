@@ -140,10 +140,12 @@ def normalize_envelope(response):
     return response
 
 
-def envelope_json(text, partial=False):
+def envelope_json(text, partial=False, first_only=False):
     text = text.lstrip()
     _, end = json.JSONDecoder().raw_decode(text)
     tail = text[end:].strip()
+    if first_only and tail.removeprefix('</parameter>').lstrip().startswith('{'):
+        return text[:end]
     if tail not in ('', '</parameter>') and not (partial and '</parameter>'.startswith(tail)):
         raise ValueError('Unexpected content after tool envelope')
     return text[:end]

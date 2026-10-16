@@ -175,7 +175,7 @@ class ToolStream:
             except ijson.JSONError:
                 if not self.envelope_closed:
                     raise
-        raw = envelope_json(self.raw.decode(), partial=True).encode() if self.envelope_closed else self.raw
+        raw = envelope_json(self.raw.decode(), partial=True, first_only=self.request.get('_standard_tools', False)).encode() if self.envelope_closed else self.raw
         if 'text' not in self.root_keys or self.active and self.active['type'] != 'text':
             return
         partial = jiter.from_json(raw, partial_mode='trailing-strings')
@@ -223,7 +223,7 @@ class ToolStream:
         if self.failed:
             raise ValueError('Invalid incremental tool response')
         if self.envelope_closed:
-            envelope_json(self.raw.decode())
+            envelope_json(self.raw.decode(), first_only=self.request.get('_standard_tools', False))
             try:
                 self.parser.close()
             except ijson.JSONError:

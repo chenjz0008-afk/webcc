@@ -283,7 +283,7 @@ class GatewayIncrementalTests(unittest.TestCase):
         self.assertIn(b'message_stop',raw)
         self.assertEqual(account['status'],'ready');self.assert_idle()
 
-    def test_strict_duplicate_envelope_is_corrected_before_tool_delivery(self):
+    def test_strict_duplicate_envelope_completes_once_without_model_replay(self):
         from test_web_gateway import Worker,TOOLS,raw_output
         account=self.manager.get_account(self.identity)
         key=self.manager.api_keys.create({'name':'one account','accounts':[self.identity],'scopes':['messages']})
@@ -299,7 +299,7 @@ class GatewayIncrementalTests(unittest.TestCase):
         body={'model':'claude-sonnet-4-6','max_tokens':2048,'stream':True,'tools':[{**t,'strict':True} for t in TOOLS],
               'messages':[{'role':'user','content':'Read A'}]}
         with patch.object(Worker,'do_POST',replies):status,_,raw=self.request('POST','/v1/messages',body,key=key['key'])
-        self.assertEqual(status,200);self.assertEqual(len(Worker.seen),2)
+        self.assertEqual(status,200);self.assertEqual(len(Worker.seen),1)
         self.assertNotIn(b'event: error',raw)
         self.assertEqual(raw.count(b'event: content_block_start'),1)
         self.assertIn(b'message_stop',raw);self.assert_idle()

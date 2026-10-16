@@ -217,6 +217,42 @@ class EnvelopeTests(unittest.TestCase):
         with self.assertRaises(Exception):
             stream.finish({'content': [{'type': 'tool_use', 'name': 'save', 'input': {'id': 'other', 'version': 0}}], 'stop_reason': 'tool_use', 'usage': {'output_tokens': 1}})
 
+    def test_standard_web_response_frames_one_valid_envelope_without_repeating_tools(self):
+        from web_tools.api import complete
+        first = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': 0}}], 'text': 'Original'})
+        second = json.dumps({'calls': [{'name': 'unknown', 'input': {'delete': True}}], 'text': 'Must not run'})
+        for tail in (first, '</parameter>' + first, second, '</parameter> {"calls":[{"'):
+            raw = first + tail
+            with self.assertRaises(ValueError):
+                parse_response(raw, TOOLS)
+            for strict in (False, True):
+                request = {'tools': [{**TOOLS[0], 'strict': strict}], 'messages': [], '_standard_tools': True}
+                message = complete(json.dumps({'content': [{'type': 'text', 'text': raw}],
+                    'stop_reason': 'end_turn', 'usage': {'input_tokens': 10, 'output_tokens': 20}}), request)
+                self.assertEqual(message['usage']['output_tokens'], 20)
+                self.assertEqual(message['content'][-1], {'type': 'text', 'text': 'Original'})
+                for width in (1, 7, len(raw)):
+                    output = []
+                    stream = ToolStream(types.SimpleNamespace(), 'owner', request, output.append)
+                    for offset in range(0, len(raw), width):
+                        stream.upstream({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': raw[offset:offset+width]}})
+                    stream.finish(message)
+                    self.assertFalse(stream.failed)
+                    self.assertEqual(len(stream.calls), 1)
+                    self.assertEqual(stream.calls[0]['input'], {'id': 'A', 'version': 0})
+                    self.assertEqual(b''.join(output).count(b'"type": "tool_use"'), 1)
+                    self.assertIn(b'event: message_stop', b''.join(output))
+
+    def test_standard_frame_never_skips_invalid_first_calls_or_repairs_a_truncated_one(self):
+        from web_tools.api import complete, OutputProblem
+        request = {'tools': TOOLS, 'messages': [], '_standard_tools': True}
+        good = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': 0}}], 'text': ''})
+        bad = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': '0'}}], 'text': ''})
+        for raw in (bad + good, good[:-2] + good, good + ' trailing prose'):
+            with self.subTest(raw=raw), self.assertRaises(OutputProblem):
+                complete(json.dumps({'content': [{'type': 'text', 'text': raw}],
+                    'stop_reason': 'end_turn', 'usage': {'input_tokens': 1, 'output_tokens': 1}}), request)
+
     def test_standard_text_blocks_keep_order_without_creating_extra_operations(self):
         call = {'name': 'save', 'input': {'id': '中文quote', 'version': 0}}
         note = {'type': 'text', 'text': '保存后回读', 'id': ''}
