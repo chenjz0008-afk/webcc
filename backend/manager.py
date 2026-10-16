@@ -1241,7 +1241,8 @@ class Handler(BaseHTTPRequestHandler):
             headers.update({"Authorization": "Bearer " + account["key"], "Accept-Encoding": "identity"})
             with measure('upstream_headers'):
                 connection.request(self.command, self.path, body, headers)
-                self.upstream_timeout(connection)
+                header_seconds = (27 if getattr(self, 'classifier_full', False) else 18) if self.classifier_request and self.manager.retry_attempts > 1 else None
+                self.upstream_timeout(connection, ceiling=header_seconds)
                 response = connection.getresponse()
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
@@ -1502,14 +1503,14 @@ class Handler(BaseHTTPRequestHandler):
             except ClientGone:
                 self.close_connection = True
 
-    def upstream_timeout(self, connection):
+    def upstream_timeout(self, connection, ceiling=None):
         if getattr(self, 'interruption', None):
             raise self.interruption[0]
         remaining = self.request_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Request deadline")
         if connection.sock:
-            connection.sock.settimeout(min(self.manager.worker_seconds, remaining))
+            connection.sock.settimeout(min(self.manager.worker_seconds, remaining, ceiling or float('inf')))
 
     def write_stream(self, data):
         try:

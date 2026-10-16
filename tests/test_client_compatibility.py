@@ -234,6 +234,50 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def test_classifier_unavailable_session_switches_before_streamed_verdict(self):
         self.classifier_pool_failover(True)
 
+    def test_classifier_header_timeout_leaves_time_for_account_failover(self):
+        import time
+        from manager import Handler
+        second=base.ManagerTests.second_account(self)
+        first=self.manager.get_account(self.identity)
+        original_post=base.Worker.do_POST
+        original_timeout=Handler.upstream_timeout
+        ceilings=[]
+        def delayed(worker):
+            if worker.headers.get('Authorization')=='Bearer '+first['key']:
+                worker.rfile.read(int(worker.headers['Content-Length']))
+                time.sleep(.2)
+                worker.close_connection=True
+                return
+            original_post(worker)
+        def bounded(handler, connection, ceiling=None):
+            ceilings.append(ceiling)
+            return original_timeout(handler,connection,ceiling=.05 if ceiling is not None else None)
+        self.manager.request_seconds=1
+        verdict='<severity>72</severity><category>Data Exfiltration</category>'
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':verdict}]),'text/event-stream')
+        with patch.object(base.Worker,'do_POST',delayed),patch.object(Handler,'upstream_timeout',bounded):
+            status,_,raw=self.request('POST','/v1/messages',review())
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(raw)['content'][0]['text'],verdict)
+        self.assertEqual(ceilings.count(18),2)
+        self.assertIn(None,ceilings)
+        self.assertEqual(first.get('consecutive_failures',0),1)
+        self.assertEqual(first['status'],'ready')
+        self.assert_idle()
+
+    def test_classifier_header_ceiling_does_not_limit_ordinary_messages_or_body_reads(self):
+        import time,types
+        from manager import Handler
+        handler=object.__new__(Handler)
+        handler.request_deadline=time.monotonic()+30
+        handler.server=types.SimpleNamespace(manager=types.SimpleNamespace(worker_seconds=60))
+        from unittest.mock import Mock
+        connection=types.SimpleNamespace(sock=Mock())
+        handler.upstream_timeout(connection,ceiling=12)
+        self.assertEqual(connection.sock.settimeout.call_args.args[0],12)
+        handler.upstream_timeout(connection)
+        self.assertGreater(connection.sock.settimeout.call_args.args[0],29)
+
     def test_invalid_classifier_does_not_try_another_account_for_a_verdict(self):
         second=base.ManagerTests.second_account(self)
         self.reply([{'type':'text','text':'<severity>2'}])
