@@ -127,6 +127,8 @@ def normalize_envelope(response):
         for call in calls:
             if isinstance(call, dict):
                 call = dict(call)
+                if call.get('type') == '' and 'name' in call:
+                    call['type'] = 'tool_use'
                 if 'id' in call and call.get('type') in {'tool_use', 'text'}:
                     check_model_id(call.pop('id'))
                 if call.get('text') == '' and call.get('type') != 'text':

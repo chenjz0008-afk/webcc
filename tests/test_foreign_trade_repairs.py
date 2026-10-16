@@ -78,6 +78,44 @@ class EnvelopeTests(unittest.TestCase):
             with self.subTest(inputs=inputs), self.assertRaises(Exception):
                 parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
 
+    def test_empty_web_metadata_preserves_parallel_calls_in_both_stream_modes(self):
+        for strict in (False, True):
+            tools = [{**TOOLS[0], 'strict': strict}]
+            for before_input in (False, True):
+                calls = [{'name': 'save', 'input': {'id': str(i), 'version': i}} for i in range(3)]
+                call = {'type': '', 'id': '', 'name': 'save'} if before_input else {'name': 'save'}
+                call['input'] = {'id': 'last', 'version': 3}
+                if not before_input:
+                    call.update(id='', type='')
+                calls.append(call)
+                value = {'calls': calls, 'text': ''}
+                original = copy.deepcopy(value)
+                raw = json.dumps(value)
+                parsed = parse_response(raw, tools)
+                for width in (1, 7, len(raw)):
+                    with self.subTest(strict=strict, before_input=before_input, width=width):
+                        output = []
+                        stream = ToolStream(types.SimpleNamespace(), 'owner', {'tools': tools, 'messages': []}, output.append)
+                        for offset in range(0, len(raw), width):
+                            stream.upstream({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': raw[offset:offset+width]}})
+                        stream.finish({**parsed, 'usage': {'output_tokens': 1}})
+                        self.assertFalse(stream.failed)
+                        self.assertEqual([c['input'] for c in stream.calls], [c['input'] for c in calls])
+                        self.assertEqual(b''.join(output).count(b'event: content_block_stop'), 4)
+                        self.assertIn(b'event: message_stop', b''.join(output))
+                        self.assertTrue(all(c['id'].startswith('toolu_') and c['id'] for c in stream.calls))
+                self.assertEqual(value, original)
+
+    def test_empty_web_metadata_never_repairs_arguments_or_unknown_types(self):
+        for call in ({'name': 'save', 'input': {'id': 'A'}, 'type': '', 'id': ''},
+                     {'name': 'save', 'input': {'id': 'A', 'version': '0'}, 'type': '', 'id': ''},
+                     {'name': 'other', 'input': {'id': 'A', 'version': 0}, 'type': '', 'id': ''},
+                     {'name': 'save', 'input': {'id': 'A', 'version': 0}, 'type': '', 'id': None},
+                     {'name': 'save', 'input': {'id': 'A', 'version': 0}, 'type': 'execute', 'id': ''},
+                     {'type': '', 'text': 'untyped answer'}):
+            with self.subTest(call=call), self.assertRaises(Exception):
+                parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
+
     def test_misplaced_business_argument_produces_precise_correction_feedback(self):
         from web_tools.api import complete, OutputProblem
         value = {'calls': [{'name': 'save', 'input': {'id': 'A'}, 'version': 0}], 'text': ''}

@@ -119,7 +119,7 @@ class ToolStream:
                 raise ValueError('Call explanation must be text')
             self.current['text'] = value
         elif prefix == 'calls.item.type':
-            if kind != 'string' or value not in {'tool_use', 'text'}:
+            if kind != 'string' or value not in {'tool_use', 'text', ''}:
                 raise ValueError('Unknown content metadata type')
             self.current['type'] = value
         elif prefix == 'calls.item.id':
