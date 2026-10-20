@@ -1,5 +1,6 @@
 """Unmodified ClewdR profiles sharing the caller's existing account lease."""
 import fcntl
+from functools import lru_cache
 import hashlib
 import json
 from contextlib import contextmanager
@@ -7,6 +8,7 @@ from pathlib import Path
 import re
 import threading
 import time
+import tomllib
 
 
 PROFILE = 'client-tools'
@@ -20,6 +22,58 @@ CONTINUATION = (
     'Client tools are executed by the caller after you emit the declared tool JSON; they do not '
     'need to exist on this website. Never claim a tool executed without its corresponding result.'
 )
+
+
+@lru_cache(maxsize=128)
+def session_reset(path, stamp, size, session_hash):
+    config = tomllib.loads(Path(path).read_text())
+    def matches(item):
+        cookie = item.get('cookie') if isinstance(item, dict) else None
+        return isinstance(cookie, str) and hashlib.sha256(cookie.encode()).hexdigest() == session_hash
+    cookies = [item for item in config.get('cookie_array', []) if matches(item)]
+    if cookies:
+        resets = [item.get('reset_time', 0) for item in cookies]
+        return min(resets) if all(type(value) is int for value in resets) else None
+    if any(matches(item) for item in config.get('wasted_cookie', [])):
+        return -1
+    return None
+
+
+def sync_sessions(manager):
+    if not manager.worker_profiles_enabled:
+        return
+    for _ in range(2):
+        with manager.condition:
+            manager.refresh()
+            now, changed = time.time(), False
+            for account in manager.state['accounts'].values():
+                if account.get('node_id', 'node-1') != manager.node_id or account['status'] != 'ready':
+                    continue
+                try:
+                    path = Path(account['directory']) / 'profiles' / PROFILE / 'clewdr.toml'
+                    info = path.stat()
+                    reset = session_reset(str(path), info.st_mtime_ns, info.st_size, account['session_hash'])
+                except (OSError, ValueError, TypeError, KeyError):
+                    continue
+                if reset is None:
+                    continue
+                until = now + 300 if reset == -1 else reset + 300 if reset > now else 0
+                current = account.get('tools_unavailable_until', 0)
+                if (until > now and current <= now) or (not until and current):
+                    account['tools_unavailable_until'] = until
+                    changed = True
+            if not changed:
+                return
+            try:
+                manager.save()
+                return
+            except RuntimeError as error:
+                if not manager.cluster:
+                    raise
+                from cluster_state import StateConflict
+                if not isinstance(error, StateConflict):
+                    raise
+                manager.refresh()
 
 
 def state(account):
@@ -224,9 +278,10 @@ def maintain(manager, stopped=None, blocking=False):
             return False
         if manager.cluster:
             manager.cluster.reap_prewarm()
+        sync_sessions(manager)
         manager.refresh()
         accounts = [a for a in local_accounts(manager) if a['status'] == 'ready' and
-                    a.get('cooldown_until', 0) <= time.time() and not manager.expired(a)]
+                    max(a.get('cooldown_until', 0), a.get('tools_unavailable_until', 0)) <= time.time() and not manager.expired(a)]
         accounts.sort(key=lambda a: (not warm(a), -manager.last_used.get(a['id'], 0)))
         background = getattr(manager.background, 'enabled', False)
         manager.background.enabled = True
@@ -257,7 +312,7 @@ def maintain(manager, stopped=None, blocking=False):
 
 def readiness(manager):
     accounts = [a for a in local_accounts(manager) if a['status'] == 'ready' and
-                a.get('cooldown_until', 0) <= time.time() and not manager.expired(a)]
+                max(a.get('cooldown_until', 0), a.get('tools_unavailable_until', 0)) <= time.time() and not manager.expired(a)]
     requested = min(manager.worker_profile_warm, len(accounts)) if manager.worker_profiles_enabled else 0
     target = requested if headroom() else min(2, requested)
     count = sum(warm(a) for a in accounts)

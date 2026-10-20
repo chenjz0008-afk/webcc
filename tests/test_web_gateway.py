@@ -45,9 +45,12 @@ class WebGatewayTests(unittest.TestCase):
 
     def test_media_admission_released_after_validation_failure(self):
         body=self.payload_web();body['messages'][0]['content']=[{'type':'image','source':{'type':'url','url':'http://127.0.0.1'}}]
+        released = threading.Event()
         with patch('web_tools.gateway.MEDIA_SLOTS') as slots:
             slots.acquire.return_value=True
+            slots.release.side_effect = released.set
             self.assertEqual(self.web(body)[0],400)
+            self.assertTrue(released.wait(1))
             slots.release.assert_called_once()
         self.assertFalse(Worker.seen);self.assert_idle()
 
@@ -126,6 +129,42 @@ class WebGatewayTests(unittest.TestCase):
         self.assertEqual(first['status'], 'ready')
         self.assertEqual(first['consecutive_failures'], 1)
         self.assertEqual(len(json.loads(data)['content']), 1)
+        self.assert_idle()
+
+    def test_transport_diagnostics_do_not_log_upstream_secrets(self):
+        with patch('upstream_message.read', side_effect=ConnectionResetError('private-upstream-detail')), patch('builtins.print') as output:
+            status, _, data = self.web()
+        self.assertEqual(status, 502)
+        records = [json.loads(call.args[0]) for call in output.call_args_list
+                   if call.args and isinstance(call.args[0], str) and call.args[0].startswith('{')]
+        failures = [record for record in records if record.get('event') == 'tool_upstream_failure']
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]['failure'], 'ConnectionResetError')
+        self.assertEqual(failures[0]['stage'], 'upstream_read')
+        self.assertFalse(failures[0]['canceled'])
+        self.assertNotIn('private-upstream-detail', json.dumps(records))
+        self.assertNotIn('private-upstream-detail', data.decode())
+        self.assertNotIn(self.manager.get_account(self.identity)['key'], json.dumps(records))
+        self.assert_idle()
+
+    def test_standard_stream_disconnect_after_tool_is_not_replayed(self):
+        self.manager.add({'name': 'second', 'sessionKey': 'sk-ant-sid02-' + 'B' * 100 + '-ABCDEF' + 'AA',
+                          'proxy': '127.0.0.1:1080:u:p'})
+        def interrupted(response, thinking=False, on_event=None):
+            on_event({'type': 'message_start', 'message': {'model': 'upstream', 'usage': {'input_tokens': 1, 'output_tokens': 0}}})
+            on_event({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': json.dumps(OUTPUT)}})
+            raise ConnectionResetError('private-upstream-detail')
+        body = {**self.payload_web(True), 'model': 'claude-sonnet-4-6'}
+        with patch('upstream_message.read', side_effect=interrupted):
+            status, _, raw = self.request('POST', '/v1/messages', body)
+        self.assertEqual(status, 200)
+        frames = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith(b'data: ')]
+        calls = [f for f in frames if f['type'] == 'content_block_start' and f['content_block']['type'] == 'tool_use']
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(Worker.seen), 1)
+        self.assertEqual(frames[-1]['error']['code'], 'upstream_stream_interrupted')
+        self.assertNotIn('message_stop', [f['type'] for f in frames])
+        self.assertNotIn(b'private-upstream-detail', raw)
         self.assert_idle()
 
     def test_stream_error_without_tool_blocks(self):

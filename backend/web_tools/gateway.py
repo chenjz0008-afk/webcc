@@ -136,6 +136,7 @@ def _forward(handler, admit, raw=None, standard=False):
             raise ClientGone()
 
         def fetch():
+            stage = 'upstream_headers'
             try:
                 if cancelled.is_set():
                     return
@@ -151,6 +152,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 result.update(status=response.status, retry_after=response.getheader('Retry-After'),
                               node_error=response.getheader('X-WebCC-Node-Error') == '1')
                 from upstream_message import read
+                stage = 'upstream_read'
                 with measure('upstream_read', getattr(handler, 'timing', None)):
                     raw = response.read(1048576) if response.status >= 400 else read(response, thinking=standard, on_event=progress)
                 result['body'] = raw
@@ -160,6 +162,9 @@ def _forward(handler, admit, raw=None, standard=False):
                     result['proxy_failure_recorded'] = True
             except Exception as exc:
                 result['failure'] = type(exc).__name__
+                print(json.dumps({'event': 'tool_upstream_failure', 'request_id': handler.request_id,
+                                  'account_id': account['id'], 'stage': stage, 'failure': result['failure'],
+                                  'status': result.get('status'), 'canceled': cancelled.is_set()}), flush=True)
             finally:
                 connection.close()
                 handler.manager.release(account)
@@ -285,6 +290,9 @@ def _forward(handler, admit, raw=None, standard=False):
         if (status in (401, 403, 429) or status >= 500) and not result.get('proxy_failure_recorded'):
             category = 'transport:' + result['failure'] if result.get('failure') else 'upstream_http:' + str(status)
             handler.manager.record_failure(account, category, status, result.get('retry_after'))
+        if incremental and incremental.emitted:
+            last = (status, 'api_error', 'Upstream stream ended after output; request was not replayed', 'upstream_stream_interrupted')
+            break
         if status == 400:
             break
     error(*last)

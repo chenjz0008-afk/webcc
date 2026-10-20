@@ -83,9 +83,10 @@ class ToolStream:
         return prefix + (str(value) if kind == 'number' else json.dumps(value, ensure_ascii=False))
 
     def tool_start(self):
+        if self.active and self.active['type'] != 'text':
+            raise ValueError('Tool call overlaps another content block')
+        self.flush_text()
         if self.active:
-            if self.active['type'] != 'text':
-                raise ValueError('Tool call overlaps another content block')
             self.stop()
         name = self.current['name']
         choice = self.request.get('tool_choice') or {'type': 'auto'}

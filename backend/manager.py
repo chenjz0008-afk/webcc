@@ -513,6 +513,7 @@ class Manager:
             changes = {**profile, "name": name.strip(), "updated_at": updated_at}
             if digest != account["session_hash"]:
                 changes["session_imported_at"] = updated_at
+                changes['tools_unavailable_until'] = 0
             for field, limit in (("user_agent", 512), ("os_label", 80)):
                 if field in fields:
                     if not isinstance(fields[field], str) or len(fields[field]) > limit:
@@ -642,6 +643,9 @@ class Manager:
 
     @timed('queue')
     def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None, record_dispatch=True):
+        if profile:
+            from worker_profiles import sync_sessions
+            sync_sessions(self)
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -665,6 +669,8 @@ class Manager:
                         on_wait()
                     self.refresh()
                     eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed) and (a.get("node_id", "node-1") == self.node_id or a.get("node_id", "node-1") in self.nodes)]
+                    if profile:
+                        eligible = [a for a in eligible if a.get('tools_unavailable_until', 0) <= time.time()]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]

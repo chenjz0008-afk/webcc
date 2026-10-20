@@ -202,6 +202,8 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 
 ### Claude Code 的 auto 与 bypassPermissions
 
+客户端工具调度会读取本节点 ClewdR 工具容器保存的会话池状态，并通过 PostgreSQL 共享 `tools_unavailable_until`。已退休的会话暂时排除，冷却中的会话遵循上游重置时间并预留池轮询间隔。该状态只影响工具执行配置，不增加通道失败计数、不修改 Cookie，也不恢复隔离账号。只有当前凭据匹配的状态才生效；更换 sessionKey 会清除旧的工具可用性标记。
+
 Claude Code 2.1.296 的交互会话可能请求原生服务端安全判定：发送 safeguards，等待 safeguard_results。网页账号通道未提供该原生能力，不能用普通工具调用或单独分类请求的通过结果代替。按官方建议，在客户端现有 env 配置中加入以下设置，并新开会话：
 
 ```json
