@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 import test_manager as base
-from auxiliary_requests import is_classifier, prepare, validate
+from auxiliary_requests import is_classifier, is_cli_auxiliary, prepare, validate
 from web_tools.api import complete, prepare as prepare_tools, OutputProblem
 from worker_profiles import endpoint
 
@@ -34,11 +34,22 @@ def stream(blocks, reason='end_turn'):
 
 
 class ReviewTests(unittest.TestCase):
+    def test_cli_auxiliary_requires_both_system_markers_and_no_client_tools(self):
+        markers=[{'type':'text','text':'x-anthropic-billing-header: cc_version=2.1.296.test; cc_entrypoint=cli;'},
+                 {'type':'text','text':"You are Claude Code, Anthropic's official CLI for Claude."}]
+        fields={'system':markers,'messages':[{'role':'user','content':'Summarize this page'}]}
+        self.assertTrue(is_cli_auxiliary(fields))
+        for changes in ({'system':markers[:1]},{'system':markers[1:]},
+                        {'system':None},{'system':'Ordinary instructions'},
+                        {'tools':[{'name':'read'}]},
+                        {'system':[], 'messages':[{'role':'user','content':str(markers)}]}):
+            self.assertFalse(is_cli_auxiliary({**fields,**changes}))
+
     def test_full_review_recognition_and_verdicts_preserve_policy(self):
         fields=full_review_request();self.assertTrue(is_classifier(fields))
         self.assertEqual(prepare(fields)['max_tokens'],8192)
         for changes in ({'messages':[{'role':'user','content':'ordinary question'}]},
-                        {'system':'You are helpful'},{'stream':True},{'thinking':{'type':'adaptive'}}):
+                        {'system':'You are helpful'},{'thinking':{'type':'adaptive'}}):
             self.assertFalse(is_classifier({**fields,**changes}))
         for text in ('<thinking>Synthetic review.</thinking><block>no</block>',
                      '<block>yes</block>\n<category>Data Exfiltration</category>\n<reason>[Data Exfiltration] Sends private material.</reason>',
@@ -69,6 +80,11 @@ class ReviewTests(unittest.TestCase):
         original=copy.deepcopy(fields)
         self.assertEqual(prepare(fields)['max_tokens'],1024)
         self.assertEqual(fields,original)
+
+    def test_streaming_classifiers_require_the_same_complete_protocol(self):
+        for fields in (review(), full_review_request()):
+            self.assertTrue(is_classifier({**fields, 'stream': True}))
+            self.assertFalse(is_classifier({**fields, 'stream': True, 'system': 'Ordinary question'}))
 
     def test_allow_block_and_stop_delimiter_are_preserved(self):
         for text in ('<severity>2</severity>', '<severity>72</severity><category>Data Exfiltration</category>',
@@ -117,6 +133,20 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def reply(self, blocks, reason='end_turn'):
         key='Bearer '+self.manager.get_account(self.identity)['key']
         base.Worker.replies[key]=(200,stream(blocks,reason),'text/event-stream')
+
+    def test_cli_auxiliary_uses_the_existing_client_profile_without_changing_plain_messages(self):
+        self.manager.worker_profiles_enabled=True
+        markers=[{'type':'text','text':'x-anthropic-billing-header: cc_version=2.1.296.test; cc_entrypoint=cli;'},
+                 {'type':'text','text':"You are Claude Code, Anthropic's official CLI for Claude."}]
+        for system,profile in [(markers,'client-tools'),('Ordinary chat',None)]:
+            self.reply([{'type':'text','text':'Actual page summary'}])
+            with patch.object(self.manager,'worker_connection',wraps=self.manager.worker_connection) as connection:
+                status,_,raw=self.request('POST','/v1/messages',{**self.payload(),'system':system})
+            self.assertEqual(status,200)
+            self.assertEqual(connection.call_args.kwargs['profile'],profile)
+            self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':'Actual page summary'}])
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['system'],system)
+            self.assert_idle()
 
     def test_full_review_uses_existing_classifier_profile_and_preserves_verdict(self):
         for text in ('<thinking>Synthetic review</thinking><block>no</block>',
@@ -203,6 +233,107 @@ class GatewayCompatibilityTests(unittest.TestCase):
         self.assertEqual(self.manager.get_account(self.identity).get('consecutive_failures',0),0)
         self.assert_idle()
 
+    def classifier_pool_failover(self, streaming):
+        second=base.ManagerTests.second_account(self)
+        first=self.manager.get_account(self.identity)
+        base.Worker.replies['Bearer '+first['key']]=(500,b'{"error":{"type":"no_cookie_available","code":500}}')
+        verdict='<severity>72</severity><category>Data Exfiltration</category>'
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':verdict}]),'text/event-stream')
+        status,_,raw=self.request('POST','/v1/messages',{**review(),'stream':streaming})
+        self.assertEqual(status,200)
+        if streaming:
+            values=[json.loads(line[6:]) for line in raw.splitlines() if line.startswith(b'data: ')]
+            actual=''.join(value.get('delta',{}).get('text','') for value in values)
+        else:actual=json.loads(raw)['content'][0]['text']
+        self.assertEqual(actual,verdict)
+        self.assertEqual(len(base.Worker.seen),2)
+        self.assertEqual(base.Worker.seen[0]['body'],base.Worker.seen[1]['body'])
+        self.assertNotEqual(base.Worker.seen[0]['headers']['Authorization'],base.Worker.seen[1]['headers']['Authorization'])
+        self.assertEqual(first.get('consecutive_failures',0),0)
+        self.assertGreater(first['cooldown_until'],__import__('time').time())
+        self.assert_idle()
+
+    def test_classifier_unavailable_session_switches_before_json_verdict(self):
+        self.classifier_pool_failover(False)
+
+    def test_classifier_unavailable_session_switches_before_streamed_verdict(self):
+        self.classifier_pool_failover(True)
+
+    def test_classifier_header_timeout_leaves_time_for_account_failover(self):
+        import time
+        from manager import Handler
+        second=base.ManagerTests.second_account(self)
+        first=self.manager.get_account(self.identity)
+        original_post=base.Worker.do_POST
+        original_timeout=Handler.upstream_timeout
+        ceilings=[]
+        def delayed(worker):
+            if worker.headers.get('Authorization')=='Bearer '+first['key']:
+                worker.rfile.read(int(worker.headers['Content-Length']))
+                time.sleep(.2)
+                worker.close_connection=True
+                return
+            original_post(worker)
+        def bounded(handler, connection, ceiling=None):
+            ceilings.append(ceiling)
+            return original_timeout(handler,connection,ceiling=.05 if ceiling is not None else None)
+        self.manager.request_seconds=1
+        verdict='<severity>72</severity><category>Data Exfiltration</category>'
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':verdict}]),'text/event-stream')
+        with patch.object(base.Worker,'do_POST',delayed),patch.object(Handler,'upstream_timeout',bounded):
+            status,_,raw=self.request('POST','/v1/messages',review())
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(raw)['content'][0]['text'],verdict)
+        self.assertEqual(ceilings.count(18),2)
+        self.assertIn(None,ceilings)
+        self.assertEqual(first.get('consecutive_failures',0),1)
+        self.assertEqual(first['status'],'ready')
+        self.assert_idle()
+
+    def test_classifier_header_ceiling_does_not_limit_ordinary_messages_or_body_reads(self):
+        import time,types
+        from manager import Handler
+        handler=object.__new__(Handler)
+        handler.request_deadline=time.monotonic()+30
+        handler.server=types.SimpleNamespace(manager=types.SimpleNamespace(worker_seconds=60))
+        from unittest.mock import Mock
+        connection=types.SimpleNamespace(sock=Mock())
+        handler.upstream_timeout(connection,ceiling=12)
+        self.assertEqual(connection.sock.settimeout.call_args.args[0],12)
+        handler.upstream_timeout(connection)
+        self.assertGreater(connection.sock.settimeout.call_args.args[0],29)
+
+    def test_invalid_classifier_does_not_try_another_account_for_a_verdict(self):
+        second=base.ManagerTests.second_account(self)
+        self.reply([{'type':'text','text':'<severity>2'}])
+        base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':'<severity>2</severity>'}]),'text/event-stream')
+        status,headers,_=self.request('POST','/v1/messages',review())
+        self.assertEqual(status,502)
+        self.assertEqual({k.lower():v for k,v in headers.items()}['x-should-retry'],'false')
+        self.assertEqual(len(base.Worker.seen),1)
+        self.assert_idle()
+
+    def test_classifier_retry_policy_resets_on_a_reused_http_connection(self):
+        import http.client
+        second=base.ManagerTests.second_account(self)
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        headers={'Authorization':'Bearer api-password','Content-Type':'application/json'}
+        try:
+            self.reply([{'type':'text','text':'<severity>2'}])
+            connection.request('POST','/v1/messages',json.dumps(review()),headers)
+            response=connection.getresponse();self.assertEqual(response.status,502);response.read()
+            first=self.manager.get_account(self.identity)
+            self.manager.last_used[self.identity]=0
+            self.manager.last_used[second]=1
+            base.Worker.replies['Bearer '+first['key']]=(500,b'{"error":{"type":"no_cookie_available","code":500}}')
+            base.Worker.replies['Bearer '+self.manager.get_account(second)['key']]=(200,stream([{'type':'text','text':'<severity>2</severity>'}]),'text/event-stream')
+            connection.request('POST','/v1/messages',json.dumps(review()),headers)
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertIsNone(response.getheader('x-should-retry'));response.read()
+            self.assertEqual(len(base.Worker.seen),3)
+        finally:connection.close()
+        self.assert_idle()
+
     def test_hidden_thinking_cannot_complete_as_an_empty_success(self):
         for requested in (False, True):
             self.reply([{'type':'thinking','thinking':'Synthetic reasoning'}],reason='max_tokens')
@@ -229,6 +360,50 @@ class GatewayCompatibilityTests(unittest.TestCase):
             self.assertEqual(json.loads(raw)['content'],[{'type':'text','text':text}])
             self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
             self.assert_idle()
+
+    def test_streaming_classifier_validates_before_delivering_a_verdict(self):
+        for text in ('<block>no</block>', '<block>yes</block>'):
+            self.reply([{'type':'thinking','thinking':'Synthetic reasoning'},{'type':'text','text':text}])
+            status,headers,raw=self.request('POST','/v1/messages',
+                {**review(),'stop_sequences':['</block>'],'stream':True})
+            self.assertEqual(status,200)
+            self.assertIn('text/event-stream',{k.lower():v for k,v in headers.items()}['content-type'])
+            values=[json.loads(line[6:]) for line in raw.splitlines() if line.startswith(b'data: ')]
+            self.assertEqual(''.join(v.get('delta',{}).get('text','') for v in values),text)
+            self.assertEqual(values[-1]['type'],'message_stop')
+            self.assertNotIn(b'Synthetic reasoning',raw)
+            self.assertEqual(json.loads(base.Worker.seen[-1]['body'])['max_tokens'],1024)
+        for text in ('<block>no', '<block>maybe</block>'):
+            self.reply([{'type':'text','text':text}])
+            status,headers,raw=self.request('POST','/v1/messages',
+                {**review(),'stop_sequences':['</block>'],'stream':True})
+            self.assertEqual(status,502)
+            self.assertEqual(dict(headers).get('x-should-retry'),'false')
+            self.assertNotIn(b'content_block_delta',raw)
+        self.assertEqual(len(base.Worker.seen),4)
+        self.assert_idle()
+
+    def test_classifier_stream_state_does_not_leak_to_the_next_request(self):
+        import http.client
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        headers={'Authorization':'Bearer api-password','Content-Type':'application/json'}
+        try:
+            self.reply([{'type':'text','text':'<block>no</block>'}])
+            connection.request('POST','/v1/messages',json.dumps(
+                {**review(),'stop_sequences':['</block>'],'stream':True}),headers)
+            response=connection.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertIn('text/event-stream',response.getheader('Content-Type'))
+            response.read()
+            self.reply([{'type':'text','text':'Ordinary answer'}])
+            connection.request('POST','/v1/messages',json.dumps(self.payload()),headers)
+            response=connection.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertIn('application/json',response.getheader('Content-Type'))
+            self.assertEqual(json.loads(response.read())['content'][0]['text'],'Ordinary answer')
+        finally:
+            connection.close()
+        self.assert_idle()
 
     def test_profile_uses_the_original_image_proxy_and_existing_account_slot(self):
         self.manager.worker_profiles_enabled=True

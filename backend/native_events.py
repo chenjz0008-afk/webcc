@@ -43,6 +43,8 @@ class NativeEvents:
 
     def frame(self,value):
         value=normalize_event(copy.deepcopy(value));kind=value.get('type');index=value.get('index')
+        if kind=='message_limit':
+            return []
         if kind=='message_start':self.model=value['message'].get('model','unknown')
         if kind=='content_block_start':
             block=value['content_block'];self.blocks[index]=copy.deepcopy(block)

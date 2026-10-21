@@ -1,6 +1,6 @@
 # WebCC API 接入说明
 
-文档版本：2026-10-14
+文档版本：2026-10-21
 
 ## 1. 连接配置
 
@@ -185,6 +185,8 @@ print(content)
 
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
+Claude Code 默认最多重试 10 次，可通过客户端环境变量 `CLAUDE_CODE_MAX_RETRIES=10` 固定上限；首次请求不计入重试。倒计时和退避由客户端处理，部分错误会提前结束。其他客户端与 SDK 使用各自的重试设置。流式响应在 HTTP 200 后发生故障时以 `error` 事件返回，不代表请求成功完成。
+
 当前提供 Chat Completions 与 Claude Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
 
 ## 9. 客户端工具调用
@@ -200,7 +202,7 @@ Chat Completions 和 Messages 均支持声明客户端工具，无需额外适�
 | 回传结果 | `role:tool`、`tool_call_id` | `tool_result`、`tool_use_id` |
 | 流式参数 | `delta.tool_calls[].function.arguments` | `input_json_delta.partial_json` |
 
-`strict:true` 使用本地 JSON Schema 校验，完整调用验证后发布参数。结构化答案支持 Chat Completions 的 `response_format` 和 Messages 的 `output_config.format`。校验失败时不会返回完整有效工具调用；不保证官方约束采样效果。
+`strict:true` 使用本地 JSON Schema 校验，完整调用验证后发布参数。Messages 流式请求可先收到模型实际生成的前置说明；工具调用仍等待完整校验。结构化答案支持 Chat Completions 的 `response_format` 和 Messages 的 `output_config.format`。校验失败时不会返回完整有效工具调用；不保证官方约束采样效果。
 
 工具往返示例（OpenAI Python SDK）：
 

@@ -78,6 +78,44 @@ class EnvelopeTests(unittest.TestCase):
             with self.subTest(inputs=inputs), self.assertRaises(Exception):
                 parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
 
+    def test_empty_web_metadata_preserves_parallel_calls_in_both_stream_modes(self):
+        for strict in (False, True):
+            tools = [{**TOOLS[0], 'strict': strict}]
+            for before_input in (False, True):
+                calls = [{'name': 'save', 'input': {'id': str(i), 'version': i}} for i in range(3)]
+                call = {'type': '', 'id': '', 'name': 'save'} if before_input else {'name': 'save'}
+                call['input'] = {'id': 'last', 'version': 3}
+                if not before_input:
+                    call.update(id='', type='')
+                calls.append(call)
+                value = {'calls': calls, 'text': ''}
+                original = copy.deepcopy(value)
+                raw = json.dumps(value)
+                parsed = parse_response(raw, tools)
+                for width in (1, 7, len(raw)):
+                    with self.subTest(strict=strict, before_input=before_input, width=width):
+                        output = []
+                        stream = ToolStream(types.SimpleNamespace(), 'owner', {'tools': tools, 'messages': []}, output.append)
+                        for offset in range(0, len(raw), width):
+                            stream.upstream({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': raw[offset:offset+width]}})
+                        stream.finish({**parsed, 'usage': {'output_tokens': 1}})
+                        self.assertFalse(stream.failed)
+                        self.assertEqual([c['input'] for c in stream.calls], [c['input'] for c in calls])
+                        self.assertEqual(b''.join(output).count(b'event: content_block_stop'), 4)
+                        self.assertIn(b'event: message_stop', b''.join(output))
+                        self.assertTrue(all(c['id'].startswith('toolu_') and c['id'] for c in stream.calls))
+                self.assertEqual(value, original)
+
+    def test_empty_web_metadata_never_repairs_arguments_or_unknown_types(self):
+        for call in ({'name': 'save', 'input': {'id': 'A'}, 'type': '', 'id': ''},
+                     {'name': 'save', 'input': {'id': 'A', 'version': '0'}, 'type': '', 'id': ''},
+                     {'name': 'other', 'input': {'id': 'A', 'version': 0}, 'type': '', 'id': ''},
+                     {'name': 'save', 'input': {'id': 'A', 'version': 0}, 'type': '', 'id': None},
+                     {'name': 'save', 'input': {'id': 'A', 'version': 0}, 'type': 'execute', 'id': ''},
+                     {'type': '', 'text': 'untyped answer'}):
+            with self.subTest(call=call), self.assertRaises(Exception):
+                parse_response(json.dumps({'calls': [call], 'text': ''}), TOOLS)
+
     def test_misplaced_business_argument_produces_precise_correction_feedback(self):
         from web_tools.api import complete, OutputProblem
         value = {'calls': [{'name': 'save', 'input': {'id': 'A'}, 'version': 0}], 'text': ''}
@@ -129,7 +167,7 @@ class EnvelopeTests(unittest.TestCase):
             else:
                 self.assertEqual(upstream['system'][:-1],system)
                 contract=upstream['system'][-1]['text']
-            self.assertIn('never outside the JSON object',contract)
+            self.assertIn('Return one JSON object with text and calls',contract)
             payload=json.loads(upstream['messages'][0]['content'])
             self.assertEqual(payload['history'],request['messages'])
             self.assertEqual(payload['tools'],TOOLS)
@@ -178,6 +216,42 @@ class EnvelopeTests(unittest.TestCase):
         stream = self.check_stream({'calls': [{'name': 'save', 'input': {'id': '中文quote', 'version': 0}}], 'text': ''})
         with self.assertRaises(Exception):
             stream.finish({'content': [{'type': 'tool_use', 'name': 'save', 'input': {'id': 'other', 'version': 0}}], 'stop_reason': 'tool_use', 'usage': {'output_tokens': 1}})
+
+    def test_standard_web_response_frames_one_valid_envelope_without_repeating_tools(self):
+        from web_tools.api import complete
+        first = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': 0}}], 'text': 'Original'})
+        second = json.dumps({'calls': [{'name': 'unknown', 'input': {'delete': True}}], 'text': 'Must not run'})
+        for tail in (first, '</parameter>' + first, second, '</parameter> {"calls":[{"'):
+            raw = first + tail
+            with self.assertRaises(ValueError):
+                parse_response(raw, TOOLS)
+            for strict in (False, True):
+                request = {'tools': [{**TOOLS[0], 'strict': strict}], 'messages': [], '_standard_tools': True}
+                message = complete(json.dumps({'content': [{'type': 'text', 'text': raw}],
+                    'stop_reason': 'end_turn', 'usage': {'input_tokens': 10, 'output_tokens': 20}}), request)
+                self.assertEqual(message['usage']['output_tokens'], 20)
+                self.assertEqual(message['content'][-1], {'type': 'text', 'text': 'Original'})
+                for width in (1, 7, len(raw)):
+                    output = []
+                    stream = ToolStream(types.SimpleNamespace(), 'owner', request, output.append)
+                    for offset in range(0, len(raw), width):
+                        stream.upstream({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': raw[offset:offset+width]}})
+                    stream.finish(message)
+                    self.assertFalse(stream.failed)
+                    self.assertEqual(len(stream.calls), 1)
+                    self.assertEqual(stream.calls[0]['input'], {'id': 'A', 'version': 0})
+                    self.assertEqual(b''.join(output).count(b'"type": "tool_use"'), 1)
+                    self.assertIn(b'event: message_stop', b''.join(output))
+
+    def test_standard_frame_never_skips_invalid_first_calls_or_repairs_a_truncated_one(self):
+        from web_tools.api import complete, OutputProblem
+        request = {'tools': TOOLS, 'messages': [], '_standard_tools': True}
+        good = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': 0}}], 'text': ''})
+        bad = json.dumps({'calls': [{'name': 'save', 'input': {'id': 'A', 'version': '0'}}], 'text': ''})
+        for raw in (bad + good, good[:-2] + good, good + ' trailing prose'):
+            with self.subTest(raw=raw), self.assertRaises(OutputProblem):
+                complete(json.dumps({'content': [{'type': 'text', 'text': raw}],
+                    'stop_reason': 'end_turn', 'usage': {'input_tokens': 1, 'output_tokens': 1}}), request)
 
     def test_standard_text_blocks_keep_order_without_creating_extra_operations(self):
         call = {'name': 'save', 'input': {'id': '中文quote', 'version': 0}}

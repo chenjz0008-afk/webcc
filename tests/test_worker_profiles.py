@@ -1,11 +1,13 @@
 import json
+import copy
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 import test_manager as base
-from worker_profiles import PROFILE, endpoint, expire, maintain, published_port, ready_accounts, state, warm, initialize, readiness
+from worker_profiles import PROFILE, endpoint, expire, maintain, published_port, ready_accounts, state, warm, initialize, readiness, sync_sessions
 
 
 class Profiles(unittest.TestCase):
@@ -23,6 +25,82 @@ class Profiles(unittest.TestCase):
                 'sessionKey': 'sk-ant-sid02-' + chr(66 + n) * 100 + '-ABCDEFAA', 'proxy': '127.0.0.1:1080'})
             result.append(self.manager.get_account(identity))
         return result
+
+    def test_retired_session_skipped_before_dispatch_without_quarantine_or_reset(self):
+        accounts = self.accounts(2)
+        for account in accounts:
+            endpoint(self.manager, account, PROFILE)
+        path = Path(accounts[0]['directory']) / 'profiles' / PROFILE / 'clewdr.toml'
+        import tomllib
+        cookie = tomllib.loads(path.read_text())['cookie_array'][0]['cookie']
+        original = '[[wasted_cookie]]\ncookie = ' + json.dumps(cookie) + '\nreason = "Null"\n'
+        path.write_text(original)
+        selected = self.manager.acquire(profile=PROFILE)
+        try:
+            self.assertEqual(selected['id'], accounts[1]['id'])
+            self.assertGreater(accounts[0]['tools_unavailable_until'], time.time())
+            self.assertEqual(accounts[0]['status'], 'ready')
+            self.assertEqual(accounts[0].get('consecutive_failures', 0), 0)
+            self.assertEqual(path.read_text(), original)
+            self.assertNotIn(accounts[0]['id'], self.manager.dispatches)
+        finally:
+            self.manager.release(selected)
+        plain = self.manager.acquire(accounts[0]['id'])
+        self.manager.release(plain)
+
+    def test_cooling_session_uses_reset_boundary_and_only_upstream_recovery_clears_it(self):
+        account = self.accounts(1)[0]
+        endpoint(self.manager, account, PROFILE)
+        path = Path(account['directory']) / 'profiles' / PROFILE / 'clewdr.toml'
+        original = path.read_text()
+        reset = int(time.time()) + 3600
+        path.write_text(original + '\nreset_time = ' + str(reset) + '\n')
+        sync_sessions(self.manager)
+        self.assertEqual(account['tools_unavailable_until'], reset + 300)
+        with self.assertRaises(base.Problem):
+            self.manager.acquire(profile=PROFILE)
+        self.assertEqual(self.manager.total, 0)
+        path.write_text(original)
+        sync_sessions(self.manager)
+        self.assertEqual(account['tools_unavailable_until'], 0)
+        account['status'] = 'quarantined'
+        account['tools_unavailable_until'] = reset
+        self.manager.save()
+        sync_sessions(self.manager)
+        self.assertEqual(account['status'], 'quarantined')
+        self.assertEqual(account['tools_unavailable_until'], reset)
+
+    def test_old_session_files_and_broken_state_do_not_disable_new_credentials(self):
+        account = self.accounts(1)[0]
+        endpoint(self.manager, account, PROFILE)
+        path = Path(account['directory']) / 'profiles' / PROFILE / 'clewdr.toml'
+        path.write_text('[[wasted_cookie]]\ncookie = "old-credential"\nreason = "Null"\n')
+        sync_sessions(self.manager)
+        self.assertEqual(account.get('tools_unavailable_until', 0), 0)
+        path.write_text('broken = [')
+        sync_sessions(self.manager)
+        self.assertEqual(account.get('tools_unavailable_until', 0), 0)
+
+    def test_session_health_refreshes_and_retries_a_shared_state_conflict(self):
+        from cluster_state import StateConflict
+        account = self.accounts(1)[0]
+        endpoint(self.manager, account, PROFILE)
+        path = Path(account['directory']) / 'profiles' / PROFILE / 'clewdr.toml'
+        import tomllib
+        cookie = tomllib.loads(path.read_text())['cookie_array'][0]['cookie']
+        path.write_text('[[wasted_cookie]]\ncookie = ' + json.dumps(cookie) + '\nreason = "Null"\n')
+        persisted, writes = copy.deepcopy(self.manager.state), []
+        def refresh():
+            self.manager.state = copy.deepcopy(persisted)
+        def save():
+            writes.append(True)
+            if len(writes) == 1:
+                raise StateConflict('Concurrent health update')
+            persisted.update(copy.deepcopy(self.manager.state))
+        with patch.object(self.manager, 'cluster', True), patch.object(self.manager, 'refresh', side_effect=refresh), patch.object(self.manager, 'save', side_effect=save):
+            sync_sessions(self.manager)
+        self.assertEqual(len(writes), 2)
+        self.assertGreater(persisted['accounts'][account['id']]['tools_unavailable_until'], time.time())
 
     def test_other_account_and_warm_reuse_do_not_wait_for_cold_readiness(self):
         accounts = self.accounts(3)

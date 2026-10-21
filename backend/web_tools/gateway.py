@@ -14,6 +14,8 @@ from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
 from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
 from request_timing import measure
+from tool_instructions import correction
+from protocol_errors import ERROR_TYPES
 
 
 MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
@@ -105,6 +107,7 @@ def _forward(handler, admit, raw=None, standard=False):
                         'Account queue wait limit reached; retry later' if problem.status == 429 else 'No eligible account is available')
             break
         attempted.add(account['id'])
+        handler.retry_after = None
         try:
             connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())),
                 profile='client-tools' if handler.manager.worker_profiles_enabled else None)
@@ -118,9 +121,9 @@ def _forward(handler, admit, raw=None, standard=False):
         incremental = None
         from web_tools.api import output_schema
         strict_commit = any(t.get('strict') and not t.get('eager_input_streaming') for t in request.get('tools', []))
-        if standard and request.get('stream') and not strict_commit and not request.get('_citation_sources') and output_schema(request) is None:
+        if standard and request.get('stream') and not request.get('_citation_sources') and output_schema(request) is None:
             from web_tools.streaming import ToolStream
-            incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
+            incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk, defer_tools=strict_commit)
 
         def progress(value):
             if getattr(handler, 'timing', None):
@@ -136,6 +139,7 @@ def _forward(handler, admit, raw=None, standard=False):
             raise ClientGone()
 
         def fetch():
+            stage = 'upstream_headers'
             try:
                 if cancelled.is_set():
                     return
@@ -151,6 +155,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 result.update(status=response.status, retry_after=response.getheader('Retry-After'),
                               node_error=response.getheader('X-WebCC-Node-Error') == '1')
                 from upstream_message import read
+                stage = 'upstream_read'
                 with measure('upstream_read', getattr(handler, 'timing', None)):
                     raw = response.read(1048576) if response.status >= 400 else read(response, thinking=standard, on_event=progress)
                 result['body'] = raw
@@ -160,6 +165,9 @@ def _forward(handler, admit, raw=None, standard=False):
                     result['proxy_failure_recorded'] = True
             except Exception as exc:
                 result['failure'] = type(exc).__name__
+                print(json.dumps({'event': 'tool_upstream_failure', 'request_id': handler.request_id,
+                                  'account_id': account['id'], 'stage': stage, 'failure': result['failure'],
+                                  'status': result.get('status'), 'canceled': cancelled.is_set()}), flush=True)
             finally:
                 connection.close()
                 handler.manager.release(account)
@@ -231,14 +239,16 @@ def _forward(handler, admit, raw=None, standard=False):
                 last = (502, 'api_error', 'Unexpected server tool execution; request was not replayed', 'unexpected_server_tool')
                 break
             status = 504 if result['failure'] == 'TimeoutError' else 502
-            last = (status, 'api_error', 'Experimental upstream connection failed')
+            last = (status, ERROR_TYPES.get(status, 'api_error'), 'Experimental upstream connection failed')
         elif status >= 400:
+            from protocol_errors import retry_after
+            handler.retry_after = retry_after(result.get('retry_after'))
             from worker_errors import no_session
             if no_session(status, result.get('body', b'')):
                 handler.manager.record_failure(account, 'cookie_pool_unavailable', 503)
                 last = (503, 'overloaded_error', 'Account worker has no available session; retry later', 'cookie_pool_unavailable')
                 continue
-            last = (status, 'rate_limit_error' if status == 429 else 'api_error', 'Experimental upstream rejected request')
+            last = (status, ERROR_TYPES.get(status, 'api_error'), 'Experimental upstream rejected request')
         else:
             try:
                 with measure('validation'):
@@ -259,8 +269,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 text = ''.join(b.get('text', '') for b in previous.get('content', []) if isinstance(b, dict) and b.get('type') == 'text')
                 if len(text.encode()) <= 32768:
                     upstream['messages'].extend([{'role': 'assistant', 'content': text},
-                        {'role': 'user', 'content': 'The previous reply failed validation: ' + json.dumps(problem.feedback or {}, ensure_ascii=False) +
-                         '. Fix every listed issue using the declared schemas and original task. Missing and unexpected property names must be corrected, not repeated. Input property names must match input_schema exactly, with no added spaces. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
+                        {'role': 'user', 'content': correction(problem.feedback)}])
                     body = json.dumps(upstream, ensure_ascii=False).encode()
                 # A format error is not an account fault; a scoped single account
                 # can correct it before any content or executable call is delivered.
@@ -285,6 +294,9 @@ def _forward(handler, admit, raw=None, standard=False):
         if (status in (401, 403, 429) or status >= 500) and not result.get('proxy_failure_recorded'):
             category = 'transport:' + result['failure'] if result.get('failure') else 'upstream_http:' + str(status)
             handler.manager.record_failure(account, category, status, result.get('retry_after'))
+        if incremental and incremental.emitted:
+            last = (status, 'api_error', 'Upstream stream ended after output; request was not replayed', 'upstream_stream_interrupted')
+            break
         if status == 400:
             break
     error(*last)

@@ -39,7 +39,9 @@ NO_PROXY=<本环境的 API 中继地址>
 
 curl 继承代理即可使用；--noproxy、清空代理或直接发起 HTTP/TCP 连接不能获得外网通路。代理不可用时明确失败，不回退直连。HTTPS CONNECT 仅允许 443，关闭 Via 和 X-Tinyproxy，不添加客户端 IP 请求头。
 
-默认 curl 域名白名单为 Python 文档、GitHub/API/raw/codeload、欧盟 Access2Markets、httpbin、Brave API 和本平台地址。增补域名写 MANAGER_CURL_DOMAINS 后重新执行部署脚本；重新创建代理前先停止相关测试/任务。不要把这个无公网认证的私有代理直接对外发布。
+默认 curl 域名白名单为 Python 文档、GitHub/API/raw/codeload、欧盟 Access2Markets、httpbin、Brave API、Claude 检查服务（claude.ai、api.anthropic.com）和本平台地址。内置 WebFetch 还需要放行实际目标站点，例如天气示例使用 wttr.in；切换 bypass 不会跳过该网络检查。增补域名写 MANAGER_CURL_DOMAINS 后重新执行部署脚本；重新创建代理前先停止相关测试/任务。已有自定义白名单不会自动合并新默认值。不要把这个无公网认证的私有代理直接对外发布。
+
+服务器 fetch_url 与 /v1/network/fetch 支持有界的 HTML、纯文本和 JSON 来源。JSON 原文不经过 HTML 正文提取，不重新排版；文本/JSON 上限为 256 KiB，无效 JSON 明确失败。它们与客户端内置 WebFetch 是独立路径，不能混用验收结论。
 
 更换 WebCC Base URL 不能自动约束用户电脑上的 curl。外部客户端须自行配置代理或使用上述服务器隔离环境；本次部署没有修改 Mac 的 Claude Code 或网络设置。
 

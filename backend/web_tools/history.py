@@ -1,7 +1,7 @@
 """Validation for the text-only experimental client-tool protocol."""
 import json
 import re
-from runtime_limits import TOOL_CONTEXT_MAX
+from runtime_limits import TOOL_CONTEXT_MAX, TOOL_CALLS_MAX
 from jsonschema import Draft202012Validator
 
 MAX_BYTES = TOOL_CONTEXT_MAX
@@ -138,7 +138,7 @@ def check_history(history, tools, allow_historical=False, standard=False):
             if pending and (text_seen or not standard):
                 raise ValueError('Every tool call needs an immediate result')
         else:
-            if len(calls) > 8:
+            if not standard and len(calls) > TOOL_CALLS_MAX:
                 raise ValueError('Too many historical tool calls')
             pending = calls
         previous = role

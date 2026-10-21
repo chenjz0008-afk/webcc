@@ -137,6 +137,34 @@ class IncrementalTests(unittest.TestCase):
         self.assertTrue(stream.failed);self.assertFalse(stream.emitted)
 
 class NativeAndCitationTests(unittest.TestCase):
+    def test_web_quota_notice_does_not_break_standard_message_events(self):
+        from native_events import NativeEvents
+        from anthropic.types import RawMessageStreamEvent
+        from pydantic import TypeAdapter
+        value={'id':'msg_notice','type':'message','role':'assistant','model':'fixture',
+               'content':[{'type':'text','text':'The message_limit string remains in this answer.'}],
+               'stop_reason':'end_turn','stop_sequence':None,'usage':{'input_tokens':1,'output_tokens':3}}
+        packets=list(events(value))
+        notice={'type':'message_limit','message_limit':{'type':'within_limit','remaining':None,
+                'windows':{'5h':{'status':'within_limit','resets_at':1792151400,'utilization':0.04}}}}
+        packets.insert(1,('event: message_limit\ndata: '+json.dumps(notice)+'\n\n').encode())
+        native=NativeEvents(manager(),'owner');raw=b''.join(packets);output=b''
+        for offset in range(0,len(raw),7):output+=native.feed(raw[offset:offset+7])
+        adapter=TypeAdapter(RawMessageStreamEvent)
+        for line in output.splitlines():
+            if line.startswith(b'data: '):adapter.validate_python(json.loads(line[6:]))
+        self.assertNotIn(b'event: message_limit',output)
+        self.assertEqual(native.result['content'],value['content'])
+        self.assertTrue(native.finished)
+
+    def test_quota_notice_handling_preserves_errors_and_future_events(self):
+        from native_events import NativeEvents
+        native=NativeEvents(manager(),'owner')
+        for value in ({'type':'error','error':{'type':'overloaded_error','message':'Actual upstream error'}},
+                      {'type':'future_event','payload':{'value':'Original'}}):
+            packet=native.frame(value)
+            self.assertEqual(json.loads(packet[0].split(b'data: ',1)[1]),value)
+
     def test_native_thinking_collection_and_signature_history(self):
         from native_events import NativeEvents
         m=manager();stream=NativeEvents(m,'owner')
@@ -255,7 +283,7 @@ class GatewayIncrementalTests(unittest.TestCase):
         self.assertIn(b'message_stop',raw)
         self.assertEqual(account['status'],'ready');self.assert_idle()
 
-    def test_strict_duplicate_envelope_is_corrected_before_tool_delivery(self):
+    def test_strict_duplicate_envelope_completes_once_without_model_replay(self):
         from test_web_gateway import Worker,TOOLS,raw_output
         account=self.manager.get_account(self.identity)
         key=self.manager.api_keys.create({'name':'one account','accounts':[self.identity],'scopes':['messages']})
@@ -271,7 +299,7 @@ class GatewayIncrementalTests(unittest.TestCase):
         body={'model':'claude-sonnet-4-6','max_tokens':2048,'stream':True,'tools':[{**t,'strict':True} for t in TOOLS],
               'messages':[{'role':'user','content':'Read A'}]}
         with patch.object(Worker,'do_POST',replies):status,_,raw=self.request('POST','/v1/messages',body,key=key['key'])
-        self.assertEqual(status,200);self.assertEqual(len(Worker.seen),2)
+        self.assertEqual(status,200);self.assertEqual(len(Worker.seen),1)
         self.assertNotIn(b'event: error',raw)
         self.assertEqual(raw.count(b'event: content_block_start'),1)
         self.assertIn(b'message_stop',raw);self.assert_idle()

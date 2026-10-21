@@ -200,3 +200,9 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 另一真实故障为完整工具 JSON 后再次生成 JSON。严格工具模式复用现有完整校验及有限纠正，先校验整段结果再交付，避免已发出调用后才发现无效尾部。普通增量和显式 eager 模式继续执行不重放边界；不把额外 JSON 当作可忽略噪声。
 
 公网严格 SDK 测试进一步发现网页 thinking_summary_delta 不是标准增量类型。共享 upstream_message.normalize_event 将真实 summary.summary 字符串转换为 thinking_delta；普通 NativeEvents 和工具上游读取复用，内容不丢弃，后续平台签名覆盖标准化后的真实内容。回归保存实际失败样本；不把摘要称为隐藏完整推理。
+
+### 2026-10-21 · 客户端行为与输出风格
+
+按 [Claude Code 执行机制](https://code.claude.com/docs/en/how-claude-code-works) 保留客户端的执行、权限和上下文管理，WebCC 只适配传输与标准事件。严格工具先交付上游真实说明，调用在完整 Schema 校验后交付，不把事后切块当作实时生成，不在已交付后重放。复用现有 ijson/jiter 和 SDK 验证，不新增 Agent 框架或语言运行时；真实回归发现的历史 8 次调用上限由标准历史结构校验取代，字节与配对约束继续保留。
+
+按 [官方 Output styles](https://code.claude.com/docs/en/output-styles) 配置过程英文、最终回答跟随用户语言，保留 `keep-coding-instructions: true`。风格由真实 CLI 随请求发送，不在网关重写语言、翻译日志或注入固定播报模板。验收读取实际请求与工具结果，分别核对语言、落盘内容和回读；输出风格不是语言一致性的硬保证。临时浏览器页复用 [ttyd](https://github.com/tsl0922/ttyd) 与现有服务器 CLI，避免复制终端 UI 和执行循环。
