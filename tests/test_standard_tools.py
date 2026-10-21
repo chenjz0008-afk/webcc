@@ -96,6 +96,19 @@ class StandardToolsTests(unittest.TestCase):
         malformed['messages'][-1]['content'][0]['tool_use_id']='call-0'
         with self.assertRaises(ValueError):prepare(json.dumps(malformed),standard=True)
 
+    def test_merged_parallel_history_does_not_reapply_new_call_limits(self):
+        from runtime_limits import TOOL_CALLS_MAX
+        fields=self.fields()
+        calls=[{'type':'tool_use','id':f'old-{i}','name':'add','input':{'a':i}}
+               for i in range(TOOL_CALLS_MAX+1)]
+        results=[{'type':'tool_result','tool_use_id':b['id'],'content':str(b['input']['a'])} for b in calls]
+        fields['messages'] += [{'role':'assistant','content':calls}, {'role':'user','content':results}]
+        request,body=prepare(json.dumps(fields),standard=True)
+        self.assertEqual(request['messages'],fields['messages'])
+        self.assertEqual(json.loads(json.loads(body)['messages'][0]['content'])['history'],fields['messages'])
+        fields['messages'][-1]['content'][-1]['tool_use_id']='old-0'
+        with self.assertRaises(ValueError):prepare(json.dumps(fields),standard=True)
+
     def test_long_history_still_has_byte_and_experimental_limits(self):
         from web_files import FileProblem
         from web_tools.history import MAX_BYTES,check_history

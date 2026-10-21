@@ -14,6 +14,7 @@ from web_tools.api import complete, events, prepare, OutputProblem
 from web_files import FileProblem
 from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
 from request_timing import measure
+from tool_instructions import correction
 
 
 MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
@@ -118,9 +119,9 @@ def _forward(handler, admit, raw=None, standard=False):
         incremental = None
         from web_tools.api import output_schema
         strict_commit = any(t.get('strict') and not t.get('eager_input_streaming') for t in request.get('tools', []))
-        if standard and request.get('stream') and not strict_commit and not request.get('_citation_sources') and output_schema(request) is None:
+        if standard and request.get('stream') and not request.get('_citation_sources') and output_schema(request) is None:
             from web_tools.streaming import ToolStream
-            incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk)
+            incremental = ToolStream(handler.manager, handler.caller_key or 'platform', request, chunk, defer_tools=strict_commit)
 
         def progress(value):
             if getattr(handler, 'timing', None):
@@ -264,8 +265,7 @@ def _forward(handler, admit, raw=None, standard=False):
                 text = ''.join(b.get('text', '') for b in previous.get('content', []) if isinstance(b, dict) and b.get('type') == 'text')
                 if len(text.encode()) <= 32768:
                     upstream['messages'].extend([{'role': 'assistant', 'content': text},
-                        {'role': 'user', 'content': 'The previous reply failed validation: ' + json.dumps(problem.feedback or {}, ensure_ascii=False) +
-                         '. Fix every listed issue using the declared schemas and original task. Missing and unexpected property names must be corrected, not repeated. Input property names must match input_schema exactly, with no added spaces. Every tool argument belongs inside input; call-level fields are name, input and optional text only. Return only the required calls/text JSON object. No tool from this reply has executed.'}])
+                        {'role': 'user', 'content': correction(problem.feedback)}])
                     body = json.dumps(upstream, ensure_ascii=False).encode()
                 # A format error is not an account fault; a scoped single account
                 # can correct it before any content or executable call is delivered.

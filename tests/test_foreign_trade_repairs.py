@@ -167,7 +167,7 @@ class EnvelopeTests(unittest.TestCase):
             else:
                 self.assertEqual(upstream['system'][:-1],system)
                 contract=upstream['system'][-1]['text']
-            self.assertIn('never outside the JSON object',contract)
+            self.assertIn('Return one JSON object with text and calls',contract)
             payload=json.loads(upstream['messages'][0]['content'])
             self.assertEqual(payload['history'],request['messages'])
             self.assertEqual(payload['tools'],TOOLS)

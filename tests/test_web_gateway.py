@@ -167,6 +167,38 @@ class WebGatewayTests(unittest.TestCase):
         self.assertNotIn(b'private-upstream-detail', raw)
         self.assert_idle()
 
+    def test_strict_stream_delivers_progress_before_upstream_finishes(self):
+        waiting, finish = threading.Event(), threading.Event()
+        value={'text':'Preparing.','calls':OUTPUT['calls']}
+        text=json.dumps(value)
+        split=text.index('[{')+1
+        def generation(response, thinking=False, on_event=None):
+            on_event({'type':'message_start','message':{'model':'upstream','usage':{'input_tokens':1,'output_tokens':0}}})
+            on_event({'type':'content_block_delta','delta':{'type':'text_delta','text':text[:split]}})
+            waiting.set()
+            if not finish.wait(4):raise TimeoutError()
+            on_event({'type':'content_block_delta','delta':{'type':'text_delta','text':text[split:]}})
+            return raw_output(value)
+        body={**self.payload_web(True),'model':'claude-sonnet-4-6','tools':[{**TOOLS[0],'strict':True}]}
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=2)
+        with patch('upstream_message.read',side_effect=generation):
+            try:
+                connection.request('POST','/v1/messages',json.dumps(body),
+                    {'Authorization':'Bearer api-password','Content-Type':'application/json'})
+                response=connection.getresponse()
+                self.assertTrue(waiting.wait(1))
+                data=b''
+                while b'Preparing.' not in data:data+=response.read1(65536)
+                self.assertNotIn(b'"type": "tool_use"',data)
+                self.assertFalse(finish.is_set())
+                finish.set()
+                data+=response.read()
+                self.assertIn(b'"type": "tool_use"',data)
+                self.assertIn(b'event: message_stop',data)
+            finally:
+                finish.set();connection.close()
+        self.assert_idle()
+
     def test_stream_error_without_tool_blocks(self):
         account = self.manager.get_account(self.identity)
         Worker.replies['Bearer ' + account['key']] = (200, raw_output({'calls': [], 'text': ''}))

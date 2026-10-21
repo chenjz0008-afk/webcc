@@ -1,8 +1,12 @@
 # Claude API 能力完善待办
 
-更新时间：2026-10-10。当前开发分支：`refactor/project-layout`。
+更新时间：2026-10-21。当前开发分支：`feat/claude-code-compatibility`。
 
 这里仅保留未完成事项。完整背景见 方案（历史记录已归档），已完成内容见 [变更记录](CHANGELOG.md)，回滚方式见 [开发说明](docs/DEVELOPMENT.md)。
+
+## Claude Code 兼容整理（2026-10-21）
+
+- [ ] 候选通过后备份部署、公网 SDK 和 CLI 复测，记录版本与回滚点。
 
 ## 执行规则
 
