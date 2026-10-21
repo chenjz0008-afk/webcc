@@ -131,6 +131,18 @@ class WebGatewayTests(unittest.TestCase):
         self.assertEqual(len(json.loads(data)['content']), 1)
         self.assert_idle()
 
+    def test_overload_type_is_preserved_for_json_and_stream_errors(self):
+        account = self.manager.get_account(self.identity)
+        Worker.replies['Bearer ' + account['key']] = (529, b'{"error":"fixture"}')
+        for stream in (False, True):
+            status, _, data = self.web(self.payload_web(stream))
+            self.assertEqual(status, 200 if stream else 529)
+            payload = ([json.loads(line[6:]) for line in data.splitlines()
+                        if line.startswith(b'data: ') and b'"type": "error"' in line][-1]
+                       if stream else json.loads(data))
+            self.assertEqual(payload['error']['type'], 'overloaded_error')
+            self.assert_idle()
+
     def test_transport_diagnostics_do_not_log_upstream_secrets(self):
         with patch('upstream_message.read', side_effect=ConnectionResetError('private-upstream-detail')), patch('builtins.print') as output:
             status, _, data = self.web()

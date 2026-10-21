@@ -15,6 +15,7 @@ from web_files import FileProblem
 from runtime_limits import MEDIA_INFLIGHT, TOOL_REQUEST_MAX
 from request_timing import measure
 from tool_instructions import correction
+from protocol_errors import ERROR_TYPES
 
 
 MEDIA_SLOTS = threading.BoundedSemaphore(MEDIA_INFLIGHT)
@@ -106,6 +107,7 @@ def _forward(handler, admit, raw=None, standard=False):
                         'Account queue wait limit reached; retry later' if problem.status == 429 else 'No eligible account is available')
             break
         attempted.add(account['id'])
+        handler.retry_after = None
         try:
             connection = handler.manager.worker_connection(account, min(handler.manager.worker_seconds, max(.1, handler.request_deadline - time.monotonic())),
                 profile='client-tools' if handler.manager.worker_profiles_enabled else None)
@@ -237,14 +239,16 @@ def _forward(handler, admit, raw=None, standard=False):
                 last = (502, 'api_error', 'Unexpected server tool execution; request was not replayed', 'unexpected_server_tool')
                 break
             status = 504 if result['failure'] == 'TimeoutError' else 502
-            last = (status, 'api_error', 'Experimental upstream connection failed')
+            last = (status, ERROR_TYPES.get(status, 'api_error'), 'Experimental upstream connection failed')
         elif status >= 400:
+            from protocol_errors import retry_after
+            handler.retry_after = retry_after(result.get('retry_after'))
             from worker_errors import no_session
             if no_session(status, result.get('body', b'')):
                 handler.manager.record_failure(account, 'cookie_pool_unavailable', 503)
                 last = (503, 'overloaded_error', 'Account worker has no available session; retry later', 'cookie_pool_unavailable')
                 continue
-            last = (status, 'rate_limit_error' if status == 429 else 'api_error', 'Experimental upstream rejected request')
+            last = (status, ERROR_TYPES.get(status, 'api_error'), 'Experimental upstream rejected request')
         else:
             try:
                 with measure('validation'):

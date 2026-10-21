@@ -1,7 +1,8 @@
 import json
 import unittest
+from unittest.mock import patch
 import test_manager as base
-from protocol_errors import wrap
+from protocol_errors import wrap, retry_after
 
 
 class ProtocolErrorTests(unittest.TestCase):
@@ -10,6 +11,49 @@ class ProtocolErrorTests(unittest.TestCase):
     request = base.ManagerTests.request
     payload = base.ManagerTests.payload
     assert_idle = base.ManagerTests.assert_idle
+
+    def test_retry_after_values(self):
+        for value in ('0', '1.5', '120', 'Wed, 21 Oct 2026 07:28:00 GMT'):
+            self.assertEqual(retry_after(value), value)
+        for value in (None, '', '-1', 'NaN', 'Infinity', '1_000', '1e3', 'later', '1\r\nX-Injected: yes'):
+            self.assertIsNone(retry_after(value))
+
+    def test_upstream_retry_after_reaches_client_and_does_not_leak_to_success(self):
+        from test_web_gateway import raw_output
+        original = base.Worker.send_header
+        def header(worker, name, value):
+            original(worker, name, value)
+            if name == 'Content-Type':original(worker, 'Retry-After', '2')
+        first = self.manager.get_account(self.identity)
+        for tools in (False, True):
+            if tools:
+                self.manager.web_tools_enabled = True
+                from test_web_gateway import TOOLS
+                payload = {**self.payload(), 'max_tokens': 1024, 'tools': TOOLS}
+            else:payload = self.payload()
+            base.Worker.replies['Bearer ' + first['key']] = (503, b'{"error":"fixture"}')
+            with patch.object(base.Worker, 'send_header', header):
+                status, headers, _ = self.request('POST', '/v1/messages', payload)
+            self.assertEqual(status, 503)
+            self.assertEqual(headers.get('Retry-After'), '2')
+            first.update(consecutive_failures=0, status='ready')
+            self.manager.save()
+            second = self.manager.add({'name': 'retry-second-' + str(tools),
+                'sessionKey': 'sk-ant-sid02-' + ('B' if tools else 'C') * 100 + '-ABCDEF' + 'AA',
+                'proxy': '127.0.0.1:1080:u:p'})
+            base.Worker.replies['Bearer ' + self.manager.get_account(second)['key']] = (
+                200, raw_output() if tools else b'{"content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","model":"claude-sonnet-4-6","usage":{"input_tokens":1,"output_tokens":1}}')
+            self.manager.last_used[second] = self.manager.cursor + 100
+            dispatched = len(base.Worker.seen)
+            with patch.object(base.Worker, 'send_header', header):
+                status, headers, _ = self.request('POST', '/v1/messages', payload)
+            self.assertEqual(status, 200)
+            self.assertEqual(len(base.Worker.seen) - dispatched, 2)
+            self.assertNotIn('Retry-After', headers)
+            self.assert_idle()
+            self.manager.set_status(self.manager.get_account(second), 'disabled', 'test completed')
+            first.update(consecutive_failures=0, status='ready')
+            self.manager.save()
 
     def check(self, status, headers, body, kind):
         data = json.loads(body)

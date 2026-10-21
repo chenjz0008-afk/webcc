@@ -185,6 +185,8 @@ print(content)
 
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
+Claude Code 默认最多重试 10 次，可通过客户端环境变量 `CLAUDE_CODE_MAX_RETRIES=10` 固定上限；首次请求不计入重试。倒计时和退避由客户端处理，部分错误会提前结束。其他客户端与 SDK 使用各自的重试设置。流式响应在 HTTP 200 后发生故障时以 `error` 事件返回，不代表请求成功完成。
+
 当前提供 Chat Completions 与 Claude Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
 
 ## 9. 客户端工具调用

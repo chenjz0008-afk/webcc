@@ -241,3 +241,15 @@ Nginx 独立 Basic Auth 保护 HTTP 与 WebSocket，ttyd 仅监听回环地址�
 这是客户端设置，不是网关翻译，也不会改变 Chatbox 或其他 API 客户端的语言。外部 Claude Code 如需相同风格，将文件放入其配置目录的 `output-styles/`，在 settings.json 中设置 `"outputStyle": "English progress"`，重新启动会话。原生界面标签由 CLI 自己渲染；子代理使用各自的指令。模型遵循风格的程度仍需验收，不能保证每次输出语言完全一致。
 
 依据：[Claude Code 输出风格说明](https://code.claude.com/docs/en/output-styles)。
+
+### Claude Code 的 API 重试
+
+测试页显式设置 `CLAUDE_CODE_MAX_RETRIES=10`，使用 CLI 原生重试、退避和倒计时，不在 WebCC 生成重试提示文字。该值也是官方默认值；外部 CLI 如未覆盖它，无须额外配置。需要固定该值时，在客户端现有 settings.json 的 env 中加入 `"CLAUDE_CODE_MAX_RETRIES": "10"`，重新启动会话即可。
+
+这是客户端重试上限，首次请求不算重试；部分故障会提前结束。临时连接错误、限流和服务故障由客户端按原生规则处理，429 可提供 Retry-After。错误参数、无刷新凭据的认证失败，以及已交付完整内容块后的中断不应一律重放。流式响应在 HTTP 200 之后使用 error 事件，不能再改 HTTP 状态；完整工具调用后的恢复应保留已执行结果，而不是重新执行原始请求。
+
+WebCC 每个 HTTP 请求的现有资源切换上限仍为 3，ClewdR 的 max_retries 仍为 5；不再增加一层十次重试，不启用无限重试 watchdog。客户端重新发送会产生新的 HTTP 请求，因此客户端预算不等于所有内部上游尝试的总和。并发、租约、请求期限和重复执行保护继续独立生效。curl、Chatbox、WorkBuddy 和 SDK 的重试由各自客户端决定，不会因修改服务器 CLI 设置而获得同样的倒计时或次数。
+
+最终 HTTP 错误保留上游合法的 Retry-After 秒数或带时区的 HTTP 日期；非法头值丢弃，后续尝试和成功响应不继承前次等待时间。工具通道复用标准错误类型映射，529 保持 overloaded_error，504 保持 timeout_error。流式头部已经发送时仍返回标准 error 事件，客户端可能按原生规则切换非流式请求，不能将此过程计成另一个网关重试循环。
+
+依据：[官方错误与重试说明](https://code.claude.com/docs/en/errors)、[环境变量](https://code.claude.com/docs/en/env-vars)、[API 错误协议](https://platform.claude.com/docs/en/api/errors)。

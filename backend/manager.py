@@ -1227,6 +1227,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": getattr(self, 'should_retry', True) and (status in {429, 502, 503, 504} or status >= 500)}})
 
     def forward_attempt(self, account, body):
+        self.retry_after = None
         try:
             connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())),
                 profile='client-tools' if (getattr(self, 'classifier_request', False) or getattr(self, 'client_auxiliary_request', False)) and self.manager.worker_profiles_enabled else None)
@@ -1255,6 +1256,8 @@ class Handler(BaseHTTPRequestHandler):
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
             if response.status >= 400:
+                from protocol_errors import retry_after
+                self.retry_after = retry_after(response.getheader('Retry-After'))
                 from worker_errors import no_session, proxy_connect
                 error_body = response.read(65537)
                 if no_session(response.status, error_body):

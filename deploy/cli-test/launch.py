@@ -28,7 +28,7 @@ if not (home / '.claude.json').exists():
         'projects': {'/workspace': {'hasTrustDialogAccepted': True}}}))
 (home / 'settings.json').write_text(json.dumps({'outputStyle': 'English progress', 'permissions': {'defaultMode': mode},
     'env': {'CLAUDE_CODE_AUTO_MODE_SERVER': '0', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1',
-            'DISABLE_AUTOUPDATER': '1'}}))
+            'CLAUDE_CODE_MAX_RETRIES': '10', 'DISABLE_AUTOUPDATER': '1'}}))
 for path in [home, *home.iterdir(), styles / 'english-progress.md']:
     os.chown(path, 1000, 1000)
     path.chmod(0o700 if path.is_dir() else 0o600)
