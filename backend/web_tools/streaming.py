@@ -8,10 +8,11 @@ from message_stream import event, block_events
 from web_tools.discovery import visible_tools
 from web_tools.history import load_json, MAX_BYTES
 from web_tools import validate_call, check_model_id, envelope_json
+from runtime_limits import TOOL_CALLS_MAX
 
 
 class ToolStream:
-    def __init__(self, manager, owner, request, write):
+    def __init__(self, manager, owner, request, write, defer_tools=False):
         self.manager, self.owner, self.request, self.write = manager, owner, request, write
         self.tools = {t['name']: t for t in visible_tools(request['tools'], request['messages'])}
         self.raw, self.text, self.stack, self.input_parts = b'', '', [], []
@@ -21,10 +22,11 @@ class ToolStream:
         self.started, self.emitted, self.failed = False, False, False
         self.model, self.thought = 'unknown', None
         self.pending_thoughts = []
+        self.defer_tools, self.thoughts_emitted = defer_tools, 0
         self.root_keys, self.call_keys = set(), set()
         self.calls_closed = False
         self.envelope_closed = False
-        self.parser = ijson.parse_coro(self)
+        self.parser = None if defer_tools else ijson.parse_coro(self)
 
     def output(self, kind, **fields):
         self.emitted |= kind == 'content_block_start'
@@ -41,6 +43,7 @@ class ToolStream:
                     self.write(data)
                 self.emitted = True
                 self.index += 1
+                self.thoughts_emitted += 1
             self.pending_thoughts.clear()
 
     def start(self, block):
@@ -83,15 +86,16 @@ class ToolStream:
         return prefix + (str(value) if kind == 'number' else json.dumps(value, ensure_ascii=False))
 
     def tool_start(self):
+        if self.active and self.active['type'] != 'text':
+            raise ValueError('Tool call overlaps another content block')
+        self.flush_text()
         if self.active:
-            if self.active['type'] != 'text':
-                raise ValueError('Tool call overlaps another content block')
             self.stop()
         name = self.current['name']
         choice = self.request.get('tool_choice') or {'type': 'auto'}
         if name not in self.tools or choice['type'] == 'none' or choice['type'] == 'tool' and name != choice.get('name'):
             raise ValueError('Undeclared or disallowed tool')
-        if len(self.calls) >= 8 or choice.get('disable_parallel_tool_use') and self.calls:
+        if len(self.calls) >= TOOL_CALLS_MAX or choice.get('disable_parallel_tool_use') and self.calls:
             raise ValueError('Tool call limit exceeded')
         self.current['id'] = 'toolu_' + uuid4().hex
         self.start({'type': 'tool_use', 'id': self.current['id'], 'name': name, 'input': {}})
@@ -119,7 +123,7 @@ class ToolStream:
                 raise ValueError('Call explanation must be text')
             self.current['text'] = value
         elif prefix == 'calls.item.type':
-            if kind != 'string' or value not in {'tool_use', 'text'}:
+            if kind != 'string' or value not in {'tool_use', 'text', ''}:
                 raise ValueError('Unknown content metadata type')
             self.current['type'] = value
         elif prefix == 'calls.item.id':
@@ -169,13 +173,21 @@ class ToolStream:
         self.raw += value.encode()
         if len(self.raw) > MAX_BYTES:
             raise ValueError('Tool stream exceeds limit')
+        if self.defer_tools:
+            partial = jiter.from_json(self.raw, partial_mode='trailing-strings')
+            if isinstance(partial, dict) and next(iter(partial), None) == 'text':
+                text = partial['text']
+                if not isinstance(text, str) or not text.startswith(self.text):
+                    raise ValueError('Text stream changed unexpectedly')
+                self.append_text(text[len(self.text):])
+            return
         if not self.envelope_closed:
             try:
                 self.parser.send(value.encode())
             except ijson.JSONError:
                 if not self.envelope_closed:
                     raise
-        raw = envelope_json(self.raw.decode(), partial=True).encode() if self.envelope_closed else self.raw
+        raw = envelope_json(self.raw.decode(), partial=True, first_only=self.request.get('_standard_tools', False)).encode() if self.envelope_closed else self.raw
         if 'text' not in self.root_keys or self.active and self.active['type'] != 'text':
             return
         partial = jiter.from_json(raw, partial_mode='trailing-strings')
@@ -222,8 +234,11 @@ class ToolStream:
     def finish(self, message):
         if self.failed:
             raise ValueError('Invalid incremental tool response')
+        if self.defer_tools:
+            self.finish_validated(message)
+            return
         if self.envelope_closed:
-            envelope_json(self.raw.decode())
+            envelope_json(self.raw.decode(), first_only=self.request.get('_standard_tools', False))
             try:
                 self.parser.close()
             except ijson.JSONError:
@@ -238,5 +253,29 @@ class ToolStream:
             raise ValueError('Incremental and final content differ')
         if self.active:
             self.stop()
+        self.end(message)
+
+    def finish_validated(self, message):
+        if not self.started:
+            self.begin(message)
+        blocks = list(message['content'])
+        for _ in range(self.thoughts_emitted):
+            if not blocks or blocks[0]['type'] not in {'thinking', 'redacted_thinking'}:
+                raise ValueError('Incremental and final thinking differ')
+            blocks.pop(0)
+        if self.text:
+            if not blocks or blocks[0]['type'] != 'text' or not blocks[0]['text'].startswith(self.text):
+                raise ValueError('Incremental and final text differ')
+            self.append_text(blocks.pop(0)['text'][len(self.text):])
+        if self.active:
+            self.stop()
+        for block in blocks:
+            for data in block_events([block], self.index):
+                self.write(data)
+            self.emitted = True
+            self.index += 1
+        self.end(message)
+
+    def end(self, message):
         self.output('message_delta', delta={'stop_reason': message['stop_reason'], 'stop_sequence': message.get('stop_sequence')}, usage={'output_tokens': message['usage']['output_tokens']})
         self.output('message_stop')

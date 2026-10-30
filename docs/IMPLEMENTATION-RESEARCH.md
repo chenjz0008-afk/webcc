@@ -1,8 +1,8 @@
 # 实现前调研规则与技术参考
 
-## 2026-10-10 Claude Code 协议修复
+## 2026-10-10 C Code 协议修复
 
-[Claude Code 网关协议](https://code.claude.com/docs/en/llm-gateway-protocol)要求兼容消息中的 system、上下文扩展和完整 SSE。WebCC 保留历史顺序；Messages 与 Chat Completions 共用工具验证与流式适配，不创建第二套执行器。
+[C Code 网关协议](https://code.claude.com/docs/en/llm-gateway-protocol)要求兼容消息中的 system、上下文扩展和完整 SSE。WebCC 保留历史顺序；Messages 与 Chat Completions 共用工具验证与流式适配，不创建第二套执行器。
 
 [权限模式](https://code.claude.com/docs/en/permission-modes)说明独立审批请求及无可解析结果时的阻止行为。网关只识别完整的 severity 请求协议，单次最多 30 秒；网页通道内部为该请求保留至少 1024 输出上限，校验真实返回的 0–100 判定。超时、空回复或拒答不会变成允许；这不是原生服务端审批证明。
 
@@ -53,13 +53,13 @@ LiteLLM 提供 Messages 接口和多上游适配，可作为候选组件。是�
 
 ## E01 · 主网关实验入口与 SDK
 
-2026-10-06 核查 [Anthropic SSE 协议](https://platform.claude.com/docs/en/build-with-claude/streaming)、[官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python) 与 [SDK 配置](https://platform.claude.com/docs/en/api/sdks/python)：工具流包含内容块起止和 input_json_delta，SDK 可以聚合最终消息；流内错误必须保持 error 事件。SDK 允许明确传入 base_url 和 key，无需读取本机 Claude Code 配置。
+2026-10-06 核查 [Anthropic SSE 协议](https://platform.claude.com/docs/en/build-with-claude/streaming)、[官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python) 与 [SDK 配置](https://platform.claude.com/docs/en/api/sdks/python)：工具流包含内容块起止和 input_json_delta，SDK 可以聚合最终消息；流内错误必须保持 error 事件。SDK 允许明确传入 base_url 和 key，无需读取本机 C Code 配置。
 
 复核 [sub2api 固定网关](https://github.com/Wei-Shaw/sub2api/blob/b8dece9000c68815a5b867ca5a1e6f236e173905/backend/internal/handler/gateway_handler.go) 的 wrapReleaseOnDone、账号等待和 FailoverCanceled：请求取消应回收槽位，失败切换应区分已向客户端输出的内容。采用这些生命周期原则，继续复用本项目现有选号与失败计数，不引入 Go 服务或复制其业务代码。
 
 网页提示模式无法从生成中的任意 JSON 片段证明参数合法，因此选择缓冲上游完整响应，校验后生成 SDK 可读的 SSE；等待时可发送 ping。它不是原生逐 token 生成，也不是 Anthropic fine-grained 工具流。实际工具仍由客户端执行；格式失败和客户端取消不计账号异常，HTTP/连接故障复用已有阈值。尚未输出工具块时可以切换账号，输出工具块后不重放。
 
-入口限定 /v1/messages，要求 MANAGER_WEB_TOOLS_ENABLED=true、X-WebCC-Tools: prompt-v1 和明确模型别名 webcc-prompt-v1。默认开关关闭，普通请求维持原来的转发方式。工具适配移到独立 web_tools 包供网关和实验共享，避免生产调用测试程序。该别名表示适配策略，不表示实际 Claude 模型身份；用量保留上游报告，包括额外提示开销，不称为官方计费精确值。
+入口限定 /v1/messages，要求 MANAGER_WEB_TOOLS_ENABLED=true、X-WebCC-Tools: prompt-v1 和明确模型别名 webcc-prompt-v1。默认开关关闭，普通请求维持原来的转发方式。工具适配移到独立 web_tools 包供网关和实验共享，避免生产调用测试程序。该别名表示适配策略，不表示实际 C 模型身份；用量保留上游报告，包括额外提示开销，不称为官方计费精确值。
 
 验收包括默认网关回归、普通 SDK 与 SSE 工具往返、错误 ID 发送前拒绝、格式错误不隔离、跨账号切换、三次 500 阈值、排队和生成中的客户端断开。不据这些结果宣称图片、文档块、thinking、strict、Files、真实文档应用或完整官方协议已经支持。
 
@@ -79,7 +79,7 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 
 ## 2026-10-07 · C01 与 C24
 
-对照 [Claude 错误协议](https://platform.claude.com/docs/en/api/errors) 的状态类型、错误正文和 `request-id`，以及 [LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys) 的独立密钥、资源权限和速率控制。TypeScript SDK 固定 0.131.0；实际异常请求 ID 使用 `requestID`，流助手使用 `request_id`，通过真实 SDK 验证，避免依赖猜测的属性名。
+对照 [C 错误协议](https://platform.claude.com/docs/en/api/errors) 的状态类型、错误正文和 `request-id`，以及 [LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys) 的独立密钥、资源权限和速率控制。TypeScript SDK 固定 0.131.0；实际异常请求 ID 使用 `requestID`，流助手使用 `request_id`，通过真实 SDK 验证，避免依赖猜测的属性名。
 
 当前两核、约 2 GB 的服务器沿用现有网关，不新增 LiteLLM 服务或 PostgreSQL。独立密钥保存随机值的摘要，账号范围直接传给现有选号器，失败切换同样受范围约束。权限集中在鉴权入口，排队请求在获取资源前复核撤销与到期；已开始的请求允许完成。速率窗口使用加锁的单进程内存队列，重启会重置，不宣称提供分布式计费或官方 workspace 管理能力。
 
@@ -119,7 +119,7 @@ SDK 版本核查：2026-10-06 的 [官方 PyPI 发布](https://pypi.org/project/
 | Procrastinate 3.10.0 | PostgreSQL 事务入队、独立 Worker、停滞作业恢复 | 已有 PostgreSQL，避免增加第二套任务状态；作业只保存 ID |
 | E2B Python SDK 2.53.1 | 基础 Sandbox、文件、进程、暂停恢复、销毁与显式代理 | 复用官方虚拟机隔离和生命周期；客户端工具等待使用小型异步桥接 |
 | Agent Skills | SKILL.md frontmatter、文本资源和不可变版本快照 | 不复制第三方 Skills；保留资源结构并限制路径和容量 |
-| Claude 程序化工具调用 | async 工具、caller、工具结果关联 | 当前网页模型只负责规划，Python 和工具结果真实执行 |
+| C 程序化工具调用 | async 工具、caller、工具结果关联 | 当前网页模型只负责规划，Python 和工具结果真实执行 |
 
 官方资料和边界见 [运行时文档](DURABLE-RUNTIME.md)。取消中的沙箱计入限额，无法确认是否已启动的代码不重放。停滞任务依据 Procrastinate 心跳恢复，运行状态机进一步阻止副作用重复。
 
@@ -129,8 +129,8 @@ Procrastinate 的相同执行锁会让未来计划作业阻塞后续即时作业
 
 复用 Messages 工具适配，新增 Chat Completions 的薄转换层；保持客户端真实执行、工具 ID 配对和本地参数校验。工具输出中的等价重复名称、已知 `tool_use` 元数据和说明文本分别处理，业务字段不猜测修复。
 
-- [Claude 工具流文档](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)：细粒度输入可能是不完整 JSON，需累计、检查停止原因后执行。`strict` 调用在 WebCC 中逐调用完整校验后发布；普通增量仍保留。Thinking 在工具封装可用前暂存，避免无效规划已经提交而无法纠正。不会将参数校验后的输出声称为逐字符生成。
-- [Claude 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)：网页通道的本地校验与官方约束采样不同；引用输出截断归为生成失败，不能报成用户入参错误。
+- [C 工具流文档](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)：细粒度输入可能是不完整 JSON，需累计、检查停止原因后执行。`strict` 调用在 WebCC 中逐调用完整校验后发布；普通增量仍保留。Thinking 在工具封装可用前暂存，避免无效规划已经提交而无法纠正。不会将参数校验后的输出声称为逐字符生成。
+- [C 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)：网页通道的本地校验与官方约束采样不同；引用输出截断归为生成失败，不能报成用户入参错误。
 - [Redis Lua](https://redis.io/docs/latest/develop/programmability/eval-intro/)：复用既有 Redis 的原子脚本建立共享 FIFO 等待顺序，保留 PostgreSQL 的最终账号占用裁决。交互与后台分队列；受限账号正在占用的等待者让出入口，避免阻塞其他空闲账号。队列有界、取消清除、失联票据到期；Redis 故障不绕过调度。
 - [E2B 模板](https://docs.e2b.dev/template/quickstart)：固定办公依赖模板，执行前检查导入；运行中不安装依赖或盲目重放程序。
 - 来源验证使用同一显式代理获取 DNS 地址并固定公开 HTTPS 地址，抓取与解析均限制为 2 MiB；逐字引用仍复用现有定位器。
@@ -144,17 +144,17 @@ Python 继续负责协议与编排。实际账号等待以秒计，本地 1000 �
 再次复测发现 `" expected_version"` 带前导空格，单条 required 错误没有完整说明未知字段。采用 [jsonschema iter_errors](https://python-jsonschema.readthedocs.io/en/stable/errors/) 返回有界的完整字段错误，并补齐 calls/index/input 路径，原输入保持不变。该分析仓库同样把校验失败交给模型纠正，不能据此承诺不会生成坏参数。官方 strict 的语法约束采样属于服务端能力；仅复制客户端执行器或更换为 TypeScript 不会获得它。参考 [Anthropic 工具设计](https://www.anthropic.com/engineering/writing-tools-for-agents)，将根因样本纳入真实业务验收，先检查结果再追加改动。
 ## 2026-10-10：引用定位的职责调整
 
-连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 Claude Code 分析仓库的算法。
+连续引用验收捕获到网页 `bash_tool` 启动事件，未取得命令和执行结果，不据此断言程序已完成。原引用提示要求模型计算 Unicode 字符偏移；改为模型提供页码和逐字引句，复用平台已有定位器计算起止。唯一引句可以省略偏移，重复引句仍需明确定位；原响应字段保持一致。此职责划分是 WebCC 的实现选择，不将其归为 C Code 分析仓库的算法。
 
 原版 ClewdR 的[请求转换](https://github.com/Xerxes-2/clewdr/blob/master/src/claude_web_state/transform.rs)按全局 `web_search` 配置声明网页搜索，当前代码未显示逐请求关闭接口。本次只读核查，没有修改 ClewdR。未知网页工具继续保留防重放边界，JSON 和 SSE 采用相同规则。
 
 ## 2026-10-14：Brave 与受控客户端网络
 
-复用 Brave 官方 Web Search 接口（固定 HTTPS 地址、私有 X-Subscription-Token、extra_snippets、site 查询约束），并再次校验实际来源。参考 Sub2API 的小型 provider 封装，所有入口共用 provider、代理、缓存和限速，不增加搜索微服务或模型转发协议。明确的 Claude Code 搜索子请求直接读取实际来源，普通问题保留模型规划和结果回传。
+复用 Brave 官方 Web Search 接口（固定 HTTPS 地址、私有 X-Subscription-Token、extra_snippets、site 查询约束），并再次校验实际来源。参考 Sub2API 的小型 provider 封装，所有入口共用 provider、代理、缓存和限速，不增加搜索微服务或模型转发协议。明确的 C Code 搜索子请求直接读取实际来源，普通问题保留模型规划和结果回传。
 
 MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只读工具注解；身份使用现有 APIKeys，ContextVar 隔离并发请求。curl 复用 Ubuntu Tinyproxy 1.11.1、APT 元数据 SHA256 校验和现有 Docker 出口白名单。既有 E2B/MCP 任务分派优先，避免新搜索入口覆盖执行器。
 
-依据：[Brave 参数](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[Claude Code 网络沙箱](https://code.claude.com/docs/en/sandboxing)、[Tinyproxy 配置](https://github.com/tinyproxy/tinyproxy/blob/master/docs/man5/tinyproxy.conf.txt.in)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)、[curl 官方镜像](https://github.com/curl/curl-container)。客户端代理变量可被 curl 参数绕过，因此受控测试还使用内部 Docker 网络；不能仅凭设置环境变量宣称阻止直连。
+依据：[Brave 参数](https://api-dashboard.search.brave.com/api-reference/web/search/get)、[C Code 网络沙箱](https://code.claude.com/docs/en/sandboxing)、[Tinyproxy 配置](https://github.com/tinyproxy/tinyproxy/blob/master/docs/man5/tinyproxy.conf.txt.in)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)、[curl 官方镜像](https://github.com/curl/curl-container)。客户端代理变量可被 curl 参数绕过，因此受控测试还使用内部 Docker 网络；不能仅凭设置环境变量宣称阻止直连。
 
 
 ## 2026-10-14 · 真实客户端深测与统一流式协议
@@ -162,16 +162,16 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 - [官方 Messages 流式协议](https://platform.claude.com/docs/en/build-with-claude/streaming)规定开始、内容块增量、停止原因及 message_stop。普通文本 Chat Completions 复用已验证的 Messages 转发和 ChatResponse 转换；不在上游断流时补造成功结束，不为普通问题增加工具规划调用。图片等尚未转换的输入继续走原路径。
 - [LiteLLM Anthropic 转换实现](https://github.com/BerriAI/litellm/blob/main/litellm/llms/anthropic/chat/transformation.py)采用协议转换和停止原因映射。这里复用已有薄适配器，保留实际模型字段；真实思考以 reasoning_content 扩展返回，不冒充正文。验收使用官方 SDK 严格校验和最终消息聚合，不能仅检查 curl 收到文字。
 - 用户提供的 [StreamingToolExecutor.ts](https://github.com/liuup/claude-code-analysis/blob/main/src/services/tools/StreamingToolExecutor.ts)区分排队、执行、交付，按调用 ID 回传真实结果；进度及时输出，取消和失败不能重放已执行副作用。这是公开分析仓库，不据此断言 Anthropic 服务端的实现。继续沿用 WebCC 已有校验、租约和客户端执行边界，不复制另一套执行器。
-- [Claude Code auto mode 配置](https://code.claude.com/docs/en/auto-mode-config)允许补充实际容器隔离、公开仓库及人工测试夹具的来源。服务器隔离测试保留默认规则，只补充准确环境描述；真实拒绝、无可用判定和协议错误分别记录，不强制返回允许，也不修改用户 Mac 的权限配置。
+- [C Code auto mode 配置](https://code.claude.com/docs/en/auto-mode-config)允许补充实际容器隔离、公开仓库及人工测试夹具的来源。服务器隔离测试保留默认规则，只补充准确环境描述；真实拒绝、无可用判定和协议错误分别记录，不强制返回允许，也不修改用户 Mac 的权限配置。
 
 响应速度分别记录首段正文、单次模型调用与整项任务耗时。SDK 协议通过、文件真正保存、任务结果准确和客户端实际执行是不同验收项；营销草稿的无依据性能描述仍按内容异常记录。原始输入输出及令牌记录仅保存在仓库外。
 
-实际深测进一步发现：新版 Claude Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
+实际深测进一步发现：新版 C Code 完整审批复核使用 max_tokens=8192、无 stop_sequences，与快速 block 检查不同。此前完整复核未被识别，两次返回空 refusal。现按安全监控系统提示、关闭 Thinking、明确 transcript 和复核指令共同识别，沿用 client-tools 配置、45 秒截止时间和原始历史；复核的 block yes 必须有规则和理由。允许、拒绝、截断和拒答都有回归，不将拒答或缺失判定改写为允许。
 
 完整审批的复测仍有空拒答，不能只凭识别正确宣称自动模式恢复。格式适配保留完整安全规则与历史，仅将末尾请求私有推理的输出指令改为最终判定和规则要求的简短理由。返回结果仍做相同校验；协议缺失不重写为允许。补充只含停止原因、长度和标签的脱敏诊断，并对无完整判定的响应设置 x-should-retry: false，依据 [官方 Python SDK](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/_base_client.py)与 [TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript/blob/main/src/client.ts) 的重试实现，避免重复消费审批请求造成长时间无可见进度。瞬时上游故障的既有重试不受此规则影响。
 ## 2026-10-14 · Chatbox 接入与空回复定位
 
-核对 [Chatbox Claude provider](https://github.com/chatboxai/chatbox/blob/main/src/shared/providers/definitions/models/claude.ts) 和 [地址规范化](https://github.com/chatboxai/chatbox/blob/main/src/shared/utils/llm_utils.ts)：自定义 Claude Host 不自动添加 `/v1`；目录筛选 `type=model`。WebCC 在上游目录上补 Anthropic 字段，保留 OpenAI 字段，不将目录名称当作精确模型资格。未知发布时间使用 epoch，符合 [官方 Models 协议](https://platform.claude.com/docs/en/api/models/list)。此次未新增完整目录分页实现。
+核对 [Chatbox C provider](https://github.com/chatboxai/chatbox/blob/main/src/shared/providers/definitions/models/claude.ts) 和 [地址规范化](https://github.com/chatboxai/chatbox/blob/main/src/shared/utils/llm_utils.ts)：自定义 C Host 不自动添加 `/v1`；目录筛选 `type=model`。WebCC 在上游目录上补 Anthropic 字段，保留 OpenAI 字段，不将目录名称当作精确模型资格。未知发布时间使用 epoch，符合 [官方 Models 协议](https://platform.claude.com/docs/en/api/models/list)。此次未新增完整目录分页实现。
 
 浏览器协议依据 [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)：仅公开 `/v1/` 和 `/code/v1/` API 返回跨域头，预检限制方法与请求头；不开放管理接口，不允许 cookie 凭据。实际请求仍验证用户密钥与权限；预检不分配账号、不调用上游。响应头在统一出口添加，涵盖错误与 SSE，不引入额外服务。
 
@@ -200,3 +200,9 @@ MCP 复用官方 Python SDK FastMCP 1.30.0 的 stateless Streamable HTTP、只�
 另一真实故障为完整工具 JSON 后再次生成 JSON。严格工具模式复用现有完整校验及有限纠正，先校验整段结果再交付，避免已发出调用后才发现无效尾部。普通增量和显式 eager 模式继续执行不重放边界；不把额外 JSON 当作可忽略噪声。
 
 公网严格 SDK 测试进一步发现网页 thinking_summary_delta 不是标准增量类型。共享 upstream_message.normalize_event 将真实 summary.summary 字符串转换为 thinking_delta；普通 NativeEvents 和工具上游读取复用，内容不丢弃，后续平台签名覆盖标准化后的真实内容。回归保存实际失败样本；不把摘要称为隐藏完整推理。
+
+### 2026-10-21 · 客户端行为与输出风格
+
+按 [C Code 执行机制](https://code.claude.com/docs/en/how-claude-code-works) 保留客户端的执行、权限和上下文管理，WebCC 只适配传输与标准事件。严格工具先交付上游真实说明，调用在完整 Schema 校验后交付，不把事后切块当作实时生成，不在已交付后重放。复用现有 ijson/jiter 和 SDK 验证，不新增 Agent 框架或语言运行时；真实回归发现的历史 8 次调用上限由标准历史结构校验取代，字节与配对约束继续保留。
+
+按 [官方 Output styles](https://code.claude.com/docs/en/output-styles) 配置过程英文、最终回答跟随用户语言，保留 `keep-coding-instructions: true`。风格由真实 CLI 随请求发送，不在网关重写语言、翻译日志或注入固定播报模板。验收读取实际请求与工具结果，分别核对语言、落盘内容和回读；输出风格不是语言一致性的硬保证。临时浏览器页复用 [ttyd](https://github.com/tsl0922/ttyd) 与现有服务器 CLI，避免复制终端 UI 和执行循环。

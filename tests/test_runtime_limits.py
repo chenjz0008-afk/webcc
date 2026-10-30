@@ -26,7 +26,8 @@ class RuntimeLimitTests(unittest.TestCase):
             {'MANAGER_FILES_OWNER_BYTES': '1024'}, {'MANAGER_FILES_TOTAL_BYTES': '1'},
             {'MANAGER_FILE_DEFAULT_TTL_SECONDS': '3599'}, {'MANAGER_FILE_DEFAULT_TTL_SECONDS': '7776001'},
             {'MANAGER_MEDIA_MAX_INFLIGHT': '5'}, {'MANAGER_ATTACHMENT_MAX_COUNT': '17'},
-            {'MANAGER_TOOL_REQUEST_MAX_BYTES': '131071'}, {'MANAGER_FILES_PER_KEY': '3.5'}]
+            {'MANAGER_TOOL_REQUEST_MAX_BYTES': '131071'}, {'MANAGER_FILES_PER_KEY': '3.5'},
+            {'MANAGER_TOOL_MAX_CALLS':'0'}, {'MANAGER_TOOL_MAX_DEFINITIONS':'1025'}]
         for values in cases:
             with self.subTest(values=values):
                 result = self.evaluate(values)

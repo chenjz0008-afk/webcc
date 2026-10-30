@@ -3,6 +3,15 @@ import re
 import copy
 
 
+def is_cli_auxiliary(fields):
+    system = fields.get('system', [])
+    system = [system] if isinstance(system, str) else system
+    texts = [b.get('text', '') if isinstance(b, dict) else b for b in system] if isinstance(system, list) else []
+    return (not fields.get('tools') and
+            any(isinstance(s, str) and s.startswith('x-anthropic-billing-header:') and 'cc_entrypoint=cli;' in s for s in texts) and
+            any(isinstance(s, str) and s.startswith("You are Claude Code, Anthropic's official CLI for Claude.") for s in texts))
+
+
 def full_review(fields):
     messages = fields.get('messages')
     if not isinstance(messages, list) or not messages or not isinstance(messages[-1], dict):
@@ -19,7 +28,7 @@ def is_classifier(fields):
     system = fields.get('system', [])
     system = [system] if isinstance(system, str) else system
     texts = [b.get('text', '') if isinstance(b, dict) else b for b in system] if isinstance(system, list) else []
-    return (not fields.get('stream') and not fields.get('tools') and fields.get('thinking') == {'type': 'disabled'} and
+    return (not fields.get('tools') and fields.get('thinking') == {'type': 'disabled'} and
             (type(fields.get('max_tokens')) is int and 1 <= fields['max_tokens'] <= 128 and
              fields.get('stop_sequences') in (['</severity>'], ['</block>']) or full_review(fields)) and
             any(isinstance(s, str) and s.startswith('You are a security monitor for autonomous AI coding agents.') for s in texts))

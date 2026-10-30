@@ -1,6 +1,6 @@
 # 配置与运维
 
-## Claude Code 工具配置
+## C Code 工具配置
 
 设置 `MANAGER_WORKER_PROFILES_ENABLED=true` 后，客户端工具和独立审批请求使用按需创建的 `clewdr-<account>-tools` 容器。它使用账号当前原版镜像、原代理专用网络和配置副本，关闭内置搜索，并通过 `custom_prompt` 明确继续附件中的 API 对话。普通请求仍使用账号原容器。
 
@@ -10,7 +10,7 @@
 
 预热占位单独标记，记录持有它的 PostgreSQL 连接进程与启动时间。服务启动和维护时可回收持有进程已退出的预热占位；普通任务占位保留原有处理规则。旧版应用可忽略新增字段；回退应用前先停止新版服务并清理已退出进程的预热占位。
 
-回退时恢复备份的应用及环境文件，停止辅助容器并重启网关。无需替换 ClewdR 镜像或恢复 PostgreSQL 数据。服务器 Claude Code 验收使用独立配置、合成文件和无外网的内部容器网络，只允许访问服务器转发器。仅设置 Base URL 不等于阻断客户端其他网络请求，客户端隔离需要独立网络规则。
+回退时恢复备份的应用及环境文件，停止辅助容器并重启网关。无需替换 ClewdR 镜像或恢复 PostgreSQL 数据。服务器 C Code 验收使用独立配置、合成文件和无外网的内部容器网络，只允许访问服务器转发器。仅设置 Base URL 不等于阻断客户端其他网络请求，客户端隔离需要独立网络规则。
 
 ## 服务器位置
 
@@ -166,6 +166,10 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 
 标准 Messages 工具入口按展开后的上下文字节预算校验，不以 128 条消息提前拦截。默认 `MANAGER_TOOL_CONTEXT_BYTES=524288`，包含工具定义、系统指令及完整历史；可配置范围为 131072–2097152 字节。实验 `prompt-v1` 入口仍限制 128 条消息。
 
+新生成的工具调用默认每条回复最多 32 个（`MANAGER_TOOL_MAX_CALLS`，范围 1–128），声明默认最多 256 个（`MANAGER_TOOL_MAX_DEFINITIONS`，范围 1–1024）。这与平台模型请求并发 4、单账号并发 1 是不同的限制。标准入口对已完成历史不重新施加本轮调用数量上限，仍校验 ID 配对、结构及字节预算。
+
+严格参数路径可实时发送上游先生成的说明文字，工具调用继续等待完整结果校验，不提前交付。模型若先生成调用、后生成说明，网关不会调换其实际顺序，也不生成虚假进度。已输出后发生错误时返回流内错误，不自动重放请求。
+
 调用方须在每轮发送完整的 Messages 历史，包括实际工具结果和最新文件版本。同一调用身份下换账号不删除或摘要历史，也不跨调用方共享历史。网关未提供透明的无限上下文；大型文档应使用范围读取，长会话的压缩由客户端显式管理，保留未完成工作和已执行动作。超过预算仍返回 413，不静默截断。Thinking 状态令牌仍绑定调用身份，不能通过更换调用密钥绕过隔离。
 
 格式或参数错误在内容未交付时可以有界纠正，账号仍可参与纠正；实际上游故障继续按原策略换号。内容交付后的错误不会从头重放，避免客户端已执行的工具被重复调用。
@@ -199,3 +203,53 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 从网关外部无法精确拆开 ClewdR 内部的代理握手、上游排队与模型预填充；upstream_headers 应作为组合阶段分析，不能将其全算成代理或模型耗时。存活与就绪分开的依据见 [Kubernetes 官方说明](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)，项目无需引入 Kubernetes。
 
 同一节点的 Docker 出口链是共享系统资源，策略文件与锁统一使用节点环境 MANAGER_DATA（默认 /var/lib/clewdr-manager）。临时候选实例可使用独立 Manager 数据目录，但不能据此创建局部出口策略并覆盖共享链。容器回收验收必须同时检查回收前后完整允许集合和默认 DROP。
+
+### C Code 的 auto 与 bypassPermissions
+
+客户端工具调度会读取本节点 ClewdR 工具容器保存的会话池状态，并通过 PostgreSQL 共享 `tools_unavailable_until`。已退休的会话暂时排除，冷却中的会话遵循上游重置时间并预留池轮询间隔。该状态只影响工具执行配置，不增加通道失败计数、不修改 Cookie，也不恢复隔离账号。只有当前凭据匹配的状态才生效；更换 sessionKey 会清除旧的工具可用性标记。
+
+C Code 2.1.296 的交互会话可能请求原生服务端安全判定：发送 safeguards，等待 safeguard_results。网页账号通道未提供该原生能力，不能用普通工具调用或单独分类请求的通过结果代替。按官方建议，在客户端现有 env 配置中加入以下设置，并新开会话：
+
+```json
+{"CLAUDE_CODE_AUTO_MODE_SERVER": "0"}
+```
+
+也可用 `CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --permission-mode auto` 临时验证。此设置保留 auto 的客户端分类审批，不是 bypass，不放开代理或权限。仅设置在服务器环境文件中不能影响远端客户端。该变量是官方临时配置，升级 CLI 后应重新核对。[官方说明](https://code.claude.com/docs/en/auto-mode-classifier-billing#make-the-session-eligible)。
+
+auto 审批按完整安全监控协议识别，接受 JSON 和 SSE 请求，复用原审批执行配置。短审批必须取得完整、有效的真实判定后才能交付；SSE 在校验后发送，不代表判定过程的实时增量。空回复、截断和无效判定不会变成放行；普通聊天流式保持原路径。同一 HTTP 长连接上的请求分别初始化审批状态。
+
+审批尚未交付时，账号无可用会话或通道故障复用现有账号切换机制，总尝试次数和请求期限不增加。已完成但无效、截断的判定不自动重放；真实拒绝原样返回。HTTP 长连接的后续请求重新初始化重试状态。
+
+bypassPermissions 跳过客户端工具审批，不需要也不会由网关伪造放行。认证、资源隔离、代理出口和工具自身的网络检查仍生效。WebFetch 的域名安全检查与 auto 分类器是不同环节；切换 bypass 不能保证解决域名检查、代理白名单或站点读取失败。诊断时应分别保存审批回复、工具结果与最后正文，不能只以 CLI 退出码为零认定整个任务通过。
+
+## 独立 C Code 测试页
+
+可选入口 `/claude-test/` 使用原版 ttyd 提供真实服务器终端，不加入管理台导航，不实现另一套聊天或 Agent 循环。部署脚本是 `deploy/install-cli-test.py`，运行前须已有经验证的服务器 CLI、测试镜像及代理网络；脚本下载官方 ttyd 发布资产并记录版本与 SHA256。
+
+Nginx 独立 Basic Auth 保护 HTTP 与 WebSocket，ttyd 仅监听回环地址并检查 Origin。用户名和随机密码写入服务器私有目录，不进入源码或 URL。页面最多一个连接，选择 auto、bypassPermissions 或 Plan 后启动非 root、只读根目录、无 Docker Socket 的隔离容器；只挂载测试工作区、该模式的 CLI 会话目录和只读 CLI 安装目录。
+
+浏览器不会运行本机 C Code。模型请求走 WebCC 公网地址，工具出网走指定代理。测试使用独立的 messages/models 密钥，安装后约 24 小时过期；服务同时设 24 小时运行上限，单次连接上限 30 分钟。该入口用于内部单用户测试，不提供多人工作区隔离。
+
+`systemctl stop webcc-cli-test` 停止入口。撤销 `/var/lib/webcc-cluster/cli-playground/access.json` 中对应的调用密钥后，现有 CLI 也无法继续请求。重新开放须明确轮换测试凭据，不复用过期密钥。该目录含秘密和会话，禁止提交 Git。刷新会断开当前终端；同模式的历史保留供 CLI `/resume` 使用，正在执行的任务不保证因浏览器重连自动恢复。
+
+依据：[ttyd 官方仓库](https://github.com/tsl0922/ttyd)。
+
+### C Code 的语言风格
+
+测试页在 auto、bypassPermissions 和 Plan 中统一选用 `English progress` 输出风格：过程说明和工具简述使用英文，最终回答跟随用户语言；明确的语言要求优先。代码、文件名、引用、工具结果和错误消息保持原文。风格文件位于 `deploy/cli-test/english-progress.md`，设置 `keep-coding-instructions: true`，保留 C Code 的编程指令，不增加固定话术或逐步播报要求。
+
+这是客户端设置，不是网关翻译，也不会改变 Chatbox 或其他 API 客户端的语言。外部 C Code 如需相同风格，将文件放入其配置目录的 `output-styles/`，在 settings.json 中设置 `"outputStyle": "English progress"`，重新启动会话。原生界面标签由 CLI 自己渲染；子代理使用各自的指令。模型遵循风格的程度仍需验收，不能保证每次输出语言完全一致。
+
+依据：[C Code 输出风格说明](https://code.claude.com/docs/en/output-styles)。
+
+### C Code 的 API 重试
+
+测试页显式设置 `CLAUDE_CODE_MAX_RETRIES=10`，使用 CLI 原生重试、退避和倒计时，不在 WebCC 生成重试提示文字。该值也是官方默认值；外部 CLI 如未覆盖它，无须额外配置。需要固定该值时，在客户端现有 settings.json 的 env 中加入 `"CLAUDE_CODE_MAX_RETRIES": "10"`，重新启动会话即可。
+
+这是客户端重试上限，首次请求不算重试；部分故障会提前结束。临时连接错误、限流和服务故障由客户端按原生规则处理，429 可提供 Retry-After。错误参数、无刷新凭据的认证失败，以及已交付完整内容块后的中断不应一律重放。流式响应在 HTTP 200 之后使用 error 事件，不能再改 HTTP 状态；完整工具调用后的恢复应保留已执行结果，而不是重新执行原始请求。
+
+WebCC 每个 HTTP 请求的现有资源切换上限仍为 3，ClewdR 的 max_retries 仍为 5；不再增加一层十次重试，不启用无限重试 watchdog。客户端重新发送会产生新的 HTTP 请求，因此客户端预算不等于所有内部上游尝试的总和。并发、租约、请求期限和重复执行保护继续独立生效。curl、Chatbox、WorkBuddy 和 SDK 的重试由各自客户端决定，不会因修改服务器 CLI 设置而获得同样的倒计时或次数。
+
+最终 HTTP 错误保留上游合法的 Retry-After 秒数或带时区的 HTTP 日期；非法头值丢弃，后续尝试和成功响应不继承前次等待时间。工具通道复用标准错误类型映射，529 保持 overloaded_error，504 保持 timeout_error。流式头部已经发送时仍返回标准 error 事件，客户端可能按原生规则切换非流式请求，不能将此过程计成另一个网关重试循环。
+
+依据：[官方错误与重试说明](https://code.claude.com/docs/en/errors)、[环境变量](https://code.claude.com/docs/en/env-vars)、[API 错误协议](https://platform.claude.com/docs/en/api/errors)。

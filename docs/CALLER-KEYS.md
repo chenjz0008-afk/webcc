@@ -41,7 +41,7 @@
 {"name":"document-app","accounts":["账号ID"],"scopes":["messages","models"],"rpm":30,"expires_at":null}
 ```
 
-## Claude 错误与请求 ID
+## C 错误与请求 ID
 
 Messages、Models 及预留 Files/Skills 路由的错误使用 `type: error`、`error.type`、`error.message`、`request_id`。预留路径仍返回不支持错误，不代表已经实现 Files 或 Skills。
 
@@ -49,10 +49,10 @@ Messages、Models 及预留 Files/Skills 路由的错误使用 `type: error`、`
 
 本候选覆盖参数、鉴权、权限、资源、体积、限流、内部故障与超时等状态映射。独立密钥 RPM 有 `Retry-After`；所有上游限流恢复头、反向代理生成的错误和真实流内故障仍列入后续验收。
 
-设计依据：[Claude 错误协议](https://platform.claude.com/docs/en/api/errors)、[LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys)。WebCC 沿用现有管理和调度层，不修改 ClewdR，也没有增加第二套数据库或网关。
+设计依据：[C 错误协议](https://platform.claude.com/docs/en/api/errors)、[LiteLLM 虚拟密钥](https://docs.litellm.ai/docs/proxy/virtual_keys)。WebCC 沿用现有管理和调度层，不修改 ClewdR，也没有增加第二套数据库或网关。
 
 ## 本轮验收
 
 服务器临时环境 131 项完整回归通过（73.741 秒）。官方 TypeScript SDK 0.131.0 经候选 HTTPS 完成六轮真实合成 Markdown 工具流程，包括双文件读取、版本冲突、定点修改及读回。撤销密钥、错误工具 ID 和不受信任证书在上游调用前被拒绝；SDK 可读取成功及错误请求 ID。MUI 9.4.0 / Vite 8.3.2 构建通过；浏览器界面交互尚待发布前验收。
 
-生产账号库未变化，临时容器、依赖、证书及文件已清理。测试使用服务器代理白名单网络，不读取 Mac Claude 配置，不将本机路径或系统资料作为模型输入。证据见 验收摘要（历史记录已归档）。
+生产账号库未变化，临时容器、依赖、证书及文件已清理。测试使用服务器代理白名单网络，不读取 Mac C 配置，不将本机路径或系统资料作为模型输入。证据见 验收摘要（历史记录已归档）。

@@ -120,3 +120,40 @@ class SearchDomainTests(unittest.TestCase):
                 else:
                     self.assertEqual(fetch('https://docs.python.org/source.txt')['text'], 'x' * size)
                 parser.assert_not_called()
+
+    def test_json_source_preserves_original_text_without_html_extraction(self):
+        from unittest.mock import MagicMock
+        from source_text import fetch
+        raw = b'\xef\xbb\xbf{\n  "temperature": "31", "days": [1, 2]\n}\n'
+        for mime in ('application/json; charset=utf-8', 'application/ld+json', 'APPLICATION/PROBLEM+JSON'):
+            client = MagicMock()
+            client.__enter__.return_value = client
+            response = client.stream.return_value.__enter__.return_value
+            response.is_redirect = False
+            response.headers = {'content-type': mime}
+            response.iter_bytes.return_value = iter([raw[:20], raw[20:]])
+            with patch.dict('os.environ', {'MANAGER_SOURCE_PROXY': 'socks5://proxy.example:1080'}), \
+                    patch('source_text.httpx.Client', return_value=client), \
+                    patch('source_text.target', return_value=('https://8.8.8.8', 'example.com')), \
+                    patch('source_text.subprocess.run') as parser:
+                self.assertEqual(fetch('https://example.com/weather.json')['text'], raw.decode('utf-8-sig'))
+                parser.assert_not_called()
+
+    def test_json_source_rejects_invalid_and_oversized_content(self):
+        from unittest.mock import MagicMock
+        from source_text import fetch
+        for raw, status in ((b'{"days":', 502), (b'"\xff"', 502), (b' ' * 262145, 413)):
+            client = MagicMock()
+            client.__enter__.return_value = client
+            response = client.stream.return_value.__enter__.return_value
+            response.is_redirect = False
+            response.headers = {'content-type': 'application/json'}
+            response.iter_bytes.return_value = iter([raw])
+            with patch.dict('os.environ', {'MANAGER_SOURCE_PROXY': 'socks5://proxy.example:1080'}), \
+                    patch('source_text.httpx.Client', return_value=client), \
+                    patch('source_text.target', return_value=('https://8.8.8.8', 'example.com')), \
+                    patch('source_text.subprocess.run') as parser:
+                with self.assertRaises(FileProblem) as error:
+                    fetch('https://example.com/weather.json')
+                self.assertEqual(error.exception.status, status)
+                parser.assert_not_called()

@@ -513,6 +513,7 @@ class Manager:
             changes = {**profile, "name": name.strip(), "updated_at": updated_at}
             if digest != account["session_hash"]:
                 changes["session_imported_at"] = updated_at
+                changes['tools_unavailable_until'] = 0
             for field, limit in (("user_agent", 512), ("os_label", 80)):
                 if field in fields:
                     if not isinstance(fields[field], str) or len(fields[field]) > limit:
@@ -642,6 +643,9 @@ class Manager:
 
     @timed('queue')
     def acquire(self, identity=None, statuses=("ready",), exclude=(), request_deadline=None, on_wait=None, allowed=None, profile=None, record_dispatch=True):
+        if profile:
+            from worker_profiles import sync_sessions
+            sync_sessions(self)
         deadline = min(time.monotonic() + self.queue_seconds, request_deadline or float("inf"))
         with self.condition:
             if self.waiting >= self.queue_size:
@@ -665,6 +669,8 @@ class Manager:
                         on_wait()
                     self.refresh()
                     eligible = [a for a in self.state["accounts"].values() if a["status"] in statuses and a["id"] not in exclude and a.get("cooldown_until", 0) <= time.time() and not self.expired(a) and (identity is None or a["id"] == identity) and (allowed is None or a["id"] in allowed) and (a.get("node_id", "node-1") == self.node_id or a.get("node_id", "node-1") in self.nodes)]
+                    if profile:
+                        eligible = [a for a in eligible if a.get('tools_unavailable_until', 0) <= time.time()]
                     if not eligible:
                         raise Problem(503, "没有可用账号，请查看管理页面")
                     available = [a for a in eligible if not self.inflight.get(a["id"], 0)]
@@ -981,6 +987,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_request(self):
         self.request_id = uuid.uuid4().hex
         self.caller_key, self.allowed_accounts, self.retry_after, self.adapter = None, None, None, None
+        self.should_retry = True
         try:
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
@@ -1117,19 +1124,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = self.body() if self.command == "POST" else None
         self.classifier_request = False
+        self.classifier_stream_requested = False
+        self.client_auxiliary_request = False
         if body:
             try:
                 payload = json.loads(body)
             except (ValueError, RecursionError):
                 payload = None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                from auxiliary_requests import is_classifier, full_review, prepare as prepare_classifier
+                from auxiliary_requests import is_classifier, is_cli_auxiliary, full_review, prepare as prepare_classifier
                 self.classifier_request = is_classifier(payload)
+                self.client_auxiliary_request = is_cli_auxiliary(payload)
                 self.request_shape = {'max_tokens': payload.get('max_tokens') if type(payload.get('max_tokens')) is int else None, 'stream': bool(payload.get('stream')),
                                       'thinking_disabled': payload.get('thinking') == {'type': 'disabled'},
                                       'classifier': self.classifier_request}
                 self.include_thinking = payload.get('thinking', {}).get('type') != 'disabled' if isinstance(payload.get('thinking'), dict) else True
                 if self.classifier_request:
+                    self.classifier_stream_requested = bool(payload.get('stream'))
                     self.classifier_full = full_review(payload)
                     self.classifier_delimiter = (payload.get('stop_sequences') or ['</block>'])[0]
                     payload = prepare_classifier(payload)
@@ -1177,7 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
                 except DocumentProblem as error:
                     raise Problem(400, str(error)) from None
             if urlsplit(self.path).path == '/v1/messages' and isinstance(payload, dict):
-                self.native_stream_requested = bool(payload.get('stream'))
+                self.native_stream_requested = bool(payload.get('stream')) and not self.classifier_request
                 self.native_adapter = True
                 payload['stream'] = True
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -1191,14 +1202,14 @@ class Handler(BaseHTTPRequestHandler):
             self.request_deadline = min(self.request_deadline, time.monotonic() + (45 if getattr(self, 'classifier_full', False) else 30))
         attempted = set()
         failure = None
-        for _ in range(1 if self.classifier_request else self.manager.retry_attempts):
+        for _ in range(self.manager.retry_attempts):
             if time.monotonic() >= self.request_deadline:
                 failure = (504, "请求处理超时")
                 break
             try:
                 account = self.manager.acquire(exclude=attempted, request_deadline=self.request_deadline,
                                                on_wait=self.check_caller if self.caller_key else None, allowed=self.allowed_accounts,
-                                               profile='client-tools' if self.classifier_request and self.manager.worker_profiles_enabled else None)
+                                               profile='client-tools' if (self.classifier_request or self.client_auxiliary_request) and self.manager.worker_profiles_enabled else None)
             except Problem:
                 if failure is None:
                     raise
@@ -1210,13 +1221,16 @@ class Handler(BaseHTTPRequestHandler):
             print(json.dumps({"event": "upstream_retry", "request_id": self.request_id,
                               "account_id": account["id"], "attempt": len(attempted),
                               "status": failure[0], "reason": failure[1]}), flush=True)
+            if not getattr(self, 'should_retry', True):
+                break
         status, message = failure
         self.respond(status, {"error": {"message": message, "type": "upstream_error", "request_id": self.request_id, "attempts": len(attempted), "retryable": getattr(self, 'should_retry', True) and (status in {429, 502, 503, 504} or status >= 500)}})
 
     def forward_attempt(self, account, body):
+        self.retry_after = None
         try:
             connection = self.manager.worker_connection(account, min(self.manager.worker_seconds, max(.1, self.request_deadline - time.monotonic())),
-                profile='client-tools' if getattr(self, 'classifier_request', False) and self.manager.worker_profiles_enabled else None)
+                profile='client-tools' if (getattr(self, 'classifier_request', False) or getattr(self, 'client_auxiliary_request', False)) and self.manager.worker_profiles_enabled else None)
         except Problem:
             self.manager.release(account)
             return 503, '账号执行配置暂不可用'
@@ -1236,11 +1250,14 @@ class Handler(BaseHTTPRequestHandler):
             headers.update({"Authorization": "Bearer " + account["key"], "Accept-Encoding": "identity"})
             with measure('upstream_headers'):
                 connection.request(self.command, self.path, body, headers)
-                self.upstream_timeout(connection)
+                header_seconds = (27 if getattr(self, 'classifier_full', False) else 18) if self.classifier_request and self.manager.retry_attempts > 1 else None
+                self.upstream_timeout(connection, ceiling=header_seconds)
                 response = connection.getresponse()
             if response.getheader("X-WebCC-Node-Error") == "1":
                 return 503, "节点暂不可用"
             if response.status >= 400:
+                from protocol_errors import retry_after
+                self.retry_after = retry_after(response.getheader('Retry-After'))
                 from worker_errors import no_session, proxy_connect
                 error_body = response.read(65537)
                 if no_session(response.status, error_body):
@@ -1317,7 +1334,10 @@ class Handler(BaseHTTPRequestHandler):
                         from capability_policy import model_name
                         self.model_metadata = {'requested': getattr(self, 'requested_model', 'unknown'),
                                                'upstream': model_name(json.loads(data).get('model'))}
-                    self.respond(response.status, data, response.getheader("Content-Type") or "application/json")
+                    if getattr(self, 'classifier_stream_requested', False):
+                        self.respond_native(payload)
+                    else:
+                        self.respond(response.status, data, response.getheader("Content-Type") or "application/json")
                 except OSError:
                     raise ClientGone()
                 if self.command == "POST":
@@ -1408,6 +1428,16 @@ class Handler(BaseHTTPRequestHandler):
                           'output_tokens': message.get('usage', {}).get('output_tokens')}), flush=True)
         return 502, '上游未返回可用正文'
 
+    def respond_native(self, message):
+        if getattr(self, 'classifier_stream_requested', False):
+            from message_stream import Stream
+            self.adapter = 'webcc-native-v1'
+            output = Stream(self)
+            output.start()
+            output.complete(message)
+        else:
+            self.respond(200, message)
+
     def forward_native(self, account, response, connection):
         from native_events import NativeEvents
         from message_stream import Stream
@@ -1464,7 +1494,7 @@ class Handler(BaseHTTPRequestHandler):
                                           'full_review':getattr(self,'classifier_full',False),**diagnostics(adapter.result)}),flush=True)
                         return 502, '审批模型未返回完整判断结果，请重试或切换手动审批'
                 self.model_metadata = {'requested': self.requested_model, 'upstream': adapter.model}
-                self.respond(200, adapter.result)
+                self.respond_native(adapter.result)
             self.manager.record_success(account)
         except ClientGone:
             self.close_connection = True
@@ -1484,14 +1514,14 @@ class Handler(BaseHTTPRequestHandler):
             except ClientGone:
                 self.close_connection = True
 
-    def upstream_timeout(self, connection):
+    def upstream_timeout(self, connection, ceiling=None):
         if getattr(self, 'interruption', None):
             raise self.interruption[0]
         remaining = self.request_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Request deadline")
         if connection.sock:
-            connection.sock.settimeout(min(self.manager.worker_seconds, remaining))
+            connection.sock.settimeout(min(self.manager.worker_seconds, remaining, ceiling or float('inf')))
 
     def write_stream(self, data):
         try:
