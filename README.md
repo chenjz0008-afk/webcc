@@ -1,6 +1,6 @@
 # WebCC
 
-WebCC 是一个用于管理多个 Claude 网页账号的后台和 API 网关。你可以在页面里录入账号和代理，查看容器、出口 IP、有效期和请求情况，也可以通过一个平台密钥调用账号池。
+WebCC 是一个用于管理多个 C 网页账号的后台和 API 网关。你可以在页面里录入账号和代理，查看容器、出口 IP、有效期和请求情况，也可以通过一个平台密钥调用账号池。
 
 每个账号独立运行官方 ClewdR 容器。客户端工具可按需使用同镜像、同代理的配置副本，仍共用单账号租约。WebCC 负责账号资料、容器管理、请求分配和版本更新；ClewdR 负责连接上游。两者分别维护，本项目没有修改 ClewdR 的源码。
 
@@ -45,8 +45,8 @@ flowchart TD
     Tasks --> Manager
     Manager --> E2BProxy[E2B 专用代理]
     E2BProxy --> E2B[E2B 沙箱 · 禁止对外联网]
-    ProxyA --> Claude[Claude 上游]
-    ProxyB --> Claude
+    ProxyA --> C[C 上游]
+    ProxyB --> C
 ```
 
 后端使用 Python，通过 Docker CLI 管理账号容器；持久任务采用 PostgreSQL 与 Procrastinate，执行环境使用 E2B 官方 SDK。前端使用 React、MUI 和 Vite。Nginx 提供 HTTPS，并将页面、管理接口和模型请求转发给 WebCC。账号容器使用随机本地端口，只有网关入口对外提供服务。
@@ -132,7 +132,7 @@ WebCC 已提供客户端工具往返、文件管理、持久批量任务、Skill
 
 剩余工作与逐项验收要求见 [待办清单](TODO.md)。完成并验收后从清单删除，结果保留在 [变更记录](CHANGELOG.md)。
 
-后续目标是让 Anthropic SDK 通过平台 Base URL 和平台密钥使用明确支持的功能，按模型及能力选择合适上游。方案见 Claude API 兼容计划（历史记录已归档）。
+后续目标是让 Anthropic SDK 通过平台 Base URL 和平台密钥使用明确支持的功能，按模型及能力选择合适上游。方案见 C API 兼容计划（历史记录已归档）。
 
 ## 与外部项目的关系
 

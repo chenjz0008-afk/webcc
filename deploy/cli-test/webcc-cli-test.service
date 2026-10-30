@@ -1,5 +1,5 @@
 [Unit]
-Description=Isolated server Claude Code test terminal
+Description=Isolated server C Code test terminal
 After=docker.service clewdr-manager.service
 Requires=docker.service
 

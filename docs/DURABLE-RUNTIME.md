@@ -4,7 +4,7 @@
 
 每个密钥最多 16 个活跃任务与 512 个任务记录。批量输入展开上限 8 MiB。
 
-批量任务、Skills 管理、代码执行和程序化客户端工具调用均由 WebCC 提供。模型仍使用已有网页账号，ClewdR 源码与镜像不作修改。E2B 提供执行环境，不提供 Claude 模型。
+批量任务、Skills 管理、代码执行和程序化客户端工具调用均由 WebCC 提供。模型仍使用已有网页账号，ClewdR 源码与镜像不作修改。E2B 提供执行环境，不提供 C 模型。
 
 用量统计、精确 Token 计数、缓存命中统计及计费对齐不在本轮范围。网页通道未证明支持原生 Prompt Caching，不用本地缓存代替声明。
 
@@ -59,7 +59,7 @@ HTTP 网关仍是当前线程服务。本轮没有同时重写语言或 HTTP 框
 
 最多 8 个输入文件，合计 20 MiB；最多 8 个指定输出文件。输出写在沙箱 output/ 目录，保存到原有 PostgreSQL Files，默认保留 24 小时。调用方通过既有下载与删除接口访问。二进制生成文件可下载，但不因此扩大普通 Messages 的可读文档类型。
 
-E2B SDK 必须设置显式代理，不提供直连回退。沙箱默认禁止对外联网并关闭公开端口访问，不注入 E2B、Claude、代理或数据库凭据。仅上传选中的输入、Skill 和代码，调用方请求头不传给 E2B 或模型上游。
+E2B SDK 必须设置显式代理，不提供直连回退。沙箱默认禁止对外联网并关闭公开端口访问，不注入 E2B、C、代理或数据库凭据。仅上传选中的输入、Skill 和代码，调用方请求头不传给 E2B 或模型上游。
 
 ## 部署
 
@@ -73,7 +73,7 @@ E2B SDK 必须设置显式代理，不提供直连回退。沙箱默认禁止对
 
 ## 协议边界
 
-Batches 使用 Claude 风格的资源接口。Skills 的 JSON 上传和 /v1/runs 是平台接口。Messages 的 E2B 执行必须显式设置 X-WebCC-Runtime: e2b-v1 和 model=webcc-runtime-v1，当前使用非流式响应；较长任务可返回 202，随后查询 /v1/runs。
+Batches 使用 C 风格的资源接口。Skills 的 JSON 上传和 /v1/runs 是平台接口。Messages 的 E2B 执行必须显式设置 X-WebCC-Runtime: e2b-v1 和 model=webcc-runtime-v1，当前使用非流式响应；较长任务可返回 202，随后查询 /v1/runs。
 
 该模式不会伪造官方 Thinking 签名、原生严格采样或上游缓存。完整官方 SDK 和具体应用兼容仍需独立验收。
 
@@ -81,7 +81,7 @@ Batches 使用 Claude 风格的资源接口。Skills 的 JSON 上传和 /v1/runs
 
 - [Procrastinate 事务入队](https://procrastinate.readthedocs.io/en/stable/howto/production/external_connection.html)：任务和队列记录同事务提交。
 - [Agent Skills 规范](https://agentskills.io/specification)：采用标准说明和资源结构。
-- [Claude 程序化工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)：采用执行调用关联与等待结果的流程。
+- [C 程序化工具调用](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)：采用执行调用关联与等待结果的流程。
 - [E2B 官方 SDK](https://github.com/e2b-dev/E2B)：复用执行、文件、代理、暂停恢复和销毁。
 - [E2B 暂停与生命周期](https://docs.e2b.dev/sandbox/persistence)：暂停保留进程，平台自行管理保留期限。
 

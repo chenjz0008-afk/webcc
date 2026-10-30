@@ -2,7 +2,7 @@
 
 ## 客户端工具回归
 
-Claude Code、WorkBuddy 等客户端负责工具执行与任务推进。网关保留声明、历史、调用 ID、错误、取消和流式事件；不根据回复中的代码块执行命令，也不另建客户端任务循环。ClewdR 保持原版。
+C Code、WorkBuddy 等客户端负责工具执行与任务推进。网关保留声明、历史、调用 ID、错误、取消和流式事件；不根据回复中的代码块执行命令，也不另建客户端任务循环。ClewdR 保持原版。
 
 兼容变更须同时验收以下流程：
 
@@ -24,7 +24,7 @@ Claude Code、WorkBuddy 等客户端负责工具执行与任务推进。网关�
 
 `main` 保存经确认的版本。`server-baseline-2026-10-06` 是服务器部署快照标签；源码和静态产物来自服务器，README 与维护文档补充了说明。
 
-`feat/claude-api-compatibility` 用于逐步兼容完整 Claude API。每个提交只处理一个明确问题，提交说明包含测试结果。推送分支不会触发生产部署。
+`feat/claude-api-compatibility` 用于逐步兼容完整 C API。每个提交只处理一个明确问题，提交说明包含测试结果。推送分支不会触发生产部署。
 
 PR #2 已合并；下一阶段从合并后的 main 创建 `feat/web-tool-history`，先补实验工具历史与错误恢复，测试后单独提交。
 
@@ -32,7 +32,7 @@ PR #2 已合并；下一阶段从合并后的 main 创建 `feat/web-tool-history
 
 ## 检查
 
-后端使用 `PYTHONPATH=backend python3 -m unittest discover -s tests -v`，前端使用 `npm ci`、`npm run build` 和 `node test_accounts.mjs`。真实上游测试使用服务器隔离环境，不使用开发者本机的 Claude 登录态或项目资料。
+后端使用 `PYTHONPATH=backend python3 -m unittest discover -s tests -v`，前端使用 `npm ci`、`npm run build` 和 `node test_accounts.mjs`。真实上游测试使用服务器隔离环境，不使用开发者本机的 C 登录态或项目资料。
 
 保留一份功能矩阵，分别记录模拟测试、真实测试、模型和上游版本。不能把模拟回复当作真实请求成功。
 

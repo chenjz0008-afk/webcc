@@ -1,6 +1,6 @@
 # 平台文件资源
 
-实现位置：`postgres_files.py` 与 `web_files.py`。生产使用 PostgreSQL 保存文件和元数据，推理前展开为网页账号支持的输入。文件归属调用密钥，不绑定 Claude 账号；选号切换不会丢失平台资源。ClewdR 不修改。
+实现位置：`postgres_files.py` 与 `web_files.py`。生产使用 PostgreSQL 保存文件和元数据，推理前展开为网页账号支持的输入。文件归属调用密钥，不绑定 C 账号；选号切换不会丢失平台资源。ClewdR 不修改。
 
 ## 接口
 

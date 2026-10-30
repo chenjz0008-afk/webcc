@@ -9,7 +9,7 @@
 | 服务地址 | `https://165.154.205.213` |
 | OpenAI Base URL | `https://165.154.205.213/v1` |
 | API Key | `YOUR_API_KEY` |
-| 接口协议 | OpenAI Chat Completions、Claude Messages |
+| 接口协议 | OpenAI Chat Completions、C Messages |
 | 默认模型 | `claude-sonnet-4-6` |
 | 建议超时 | 180 秒 |
 | 请求编码 | UTF-8 |
@@ -108,7 +108,7 @@ data: [DONE]
 
 `data: [DONE]` 表示完整结束。连接中断且未收到该标记时，应按不完整响应处理。增量事件未必包含 `id`、`object`、`index`、`usage` 等字段，客户端解析器需允许这些字段缺省。
 
-## 6. Claude Messages
+## 6. C Messages
 
 接口：`POST /v1/messages`
 
@@ -134,7 +134,7 @@ Messages 支持对话中的 `system` 消息、有序工具历史和分批回传�
 
 `thinking.type=disabled` 时不返回思考内容。若上游在生成正文前已耗尽输出限制，接口返回明确错误，调用方应增加输出上限或重试。
 
-Claude Code 使用 `https://165.154.205.213` 作为 `ANTHROPIC_BASE_URL`，不加 `/v1`。客户端工具由 Claude Code 执行；需要审批的操作仍由客户端权限策略决定。审批模型未返回完整判断时，不视为允许执行。
+C Code 使用 `https://165.154.205.213` 作为 `ANTHROPIC_BASE_URL`，不加 `/v1`。客户端工具由 C Code 执行；需要审批的操作仍由客户端权限策略决定。审批模型未返回完整判断时，不视为允许执行。
 
 ## 7. Python 示例
 
@@ -185,9 +185,9 @@ print(content)
 
 服务在返回内容前最多自动尝试 3 次；已开始输出的流不自动重放。处理时间预算为 150 秒，客户端建议超时为 180 秒。转发响应提供 `X-Request-Id`；尝试耗尽的错误可包含 `request_id`、`attempts` 和 `retryable`。客户端应限制重试次数。
 
-Claude Code 默认最多重试 10 次，可通过客户端环境变量 `CLAUDE_CODE_MAX_RETRIES=10` 固定上限；首次请求不计入重试。倒计时和退避由客户端处理，部分错误会提前结束。其他客户端与 SDK 使用各自的重试设置。流式响应在 HTTP 200 后发生故障时以 `error` 事件返回，不代表请求成功完成。
+C Code 默认最多重试 10 次，可通过客户端环境变量 `CLAUDE_CODE_MAX_RETRIES=10` 固定上限；首次请求不计入重试。倒计时和退避由客户端处理，部分错误会提前结束。其他客户端与 SDK 使用各自的重试设置。流式响应在 HTTP 200 后发生故障时以 `error` 事件返回，不代表请求成功完成。
 
-当前提供 Chat Completions 与 Claude Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
+当前提供 Chat Completions 与 C Messages 接口，不提供 `/v1/responses`、Embeddings、图片生成或音频接口。
 
 ## 9. 客户端工具调用
 
@@ -299,7 +299,7 @@ curl --fail-with-body -sS --max-time 30 \
 
 标准 Streamable HTTP 地址：`https://165.154.205.213/network/mcp`。请求头使用 `Authorization: Bearer <调用密钥>`；提供 search_web 与 fetch_url。需要 MCP 支持的客户端，配置示例见 [客户端联网](docs/CLIENT-NETWORK.md)。
 
-Claude Code 的 Bash/curl 在客户端执行。Base URL 不会改变 curl 的出口；受控环境须另外配置代理和网络隔离。
+C Code 的 Bash/curl 在客户端执行。Base URL 不会改变 curl 的出口；受控环境须另外配置代理和网络隔离。
 
 ### 文件上传与引用
 

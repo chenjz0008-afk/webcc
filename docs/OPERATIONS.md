@@ -1,6 +1,6 @@
 # 配置与运维
 
-## Claude Code 工具配置
+## C Code 工具配置
 
 设置 `MANAGER_WORKER_PROFILES_ENABLED=true` 后，客户端工具和独立审批请求使用按需创建的 `clewdr-<account>-tools` 容器。它使用账号当前原版镜像、原代理专用网络和配置副本，关闭内置搜索，并通过 `custom_prompt` 明确继续附件中的 API 对话。普通请求仍使用账号原容器。
 
@@ -10,7 +10,7 @@
 
 预热占位单独标记，记录持有它的 PostgreSQL 连接进程与启动时间。服务启动和维护时可回收持有进程已退出的预热占位；普通任务占位保留原有处理规则。旧版应用可忽略新增字段；回退应用前先停止新版服务并清理已退出进程的预热占位。
 
-回退时恢复备份的应用及环境文件，停止辅助容器并重启网关。无需替换 ClewdR 镜像或恢复 PostgreSQL 数据。服务器 Claude Code 验收使用独立配置、合成文件和无外网的内部容器网络，只允许访问服务器转发器。仅设置 Base URL 不等于阻断客户端其他网络请求，客户端隔离需要独立网络规则。
+回退时恢复备份的应用及环境文件，停止辅助容器并重启网关。无需替换 ClewdR 镜像或恢复 PostgreSQL 数据。服务器 C Code 验收使用独立配置、合成文件和无外网的内部容器网络，只允许访问服务器转发器。仅设置 Base URL 不等于阻断客户端其他网络请求，客户端隔离需要独立网络规则。
 
 ## 服务器位置
 
@@ -204,11 +204,11 @@ Bearer 使用管理员密码，所有操作应只从你信任的管理系统发�
 
 同一节点的 Docker 出口链是共享系统资源，策略文件与锁统一使用节点环境 MANAGER_DATA（默认 /var/lib/clewdr-manager）。临时候选实例可使用独立 Manager 数据目录，但不能据此创建局部出口策略并覆盖共享链。容器回收验收必须同时检查回收前后完整允许集合和默认 DROP。
 
-### Claude Code 的 auto 与 bypassPermissions
+### C Code 的 auto 与 bypassPermissions
 
 客户端工具调度会读取本节点 ClewdR 工具容器保存的会话池状态，并通过 PostgreSQL 共享 `tools_unavailable_until`。已退休的会话暂时排除，冷却中的会话遵循上游重置时间并预留池轮询间隔。该状态只影响工具执行配置，不增加通道失败计数、不修改 Cookie，也不恢复隔离账号。只有当前凭据匹配的状态才生效；更换 sessionKey 会清除旧的工具可用性标记。
 
-Claude Code 2.1.296 的交互会话可能请求原生服务端安全判定：发送 safeguards，等待 safeguard_results。网页账号通道未提供该原生能力，不能用普通工具调用或单独分类请求的通过结果代替。按官方建议，在客户端现有 env 配置中加入以下设置，并新开会话：
+C Code 2.1.296 的交互会话可能请求原生服务端安全判定：发送 safeguards，等待 safeguard_results。网页账号通道未提供该原生能力，不能用普通工具调用或单独分类请求的通过结果代替。按官方建议，在客户端现有 env 配置中加入以下设置，并新开会话：
 
 ```json
 {"CLAUDE_CODE_AUTO_MODE_SERVER": "0"}
@@ -222,27 +222,27 @@ auto 审批按完整安全监控协议识别，接受 JSON 和 SSE 请求，复�
 
 bypassPermissions 跳过客户端工具审批，不需要也不会由网关伪造放行。认证、资源隔离、代理出口和工具自身的网络检查仍生效。WebFetch 的域名安全检查与 auto 分类器是不同环节；切换 bypass 不能保证解决域名检查、代理白名单或站点读取失败。诊断时应分别保存审批回复、工具结果与最后正文，不能只以 CLI 退出码为零认定整个任务通过。
 
-## 独立 Claude Code 测试页
+## 独立 C Code 测试页
 
 可选入口 `/claude-test/` 使用原版 ttyd 提供真实服务器终端，不加入管理台导航，不实现另一套聊天或 Agent 循环。部署脚本是 `deploy/install-cli-test.py`，运行前须已有经验证的服务器 CLI、测试镜像及代理网络；脚本下载官方 ttyd 发布资产并记录版本与 SHA256。
 
 Nginx 独立 Basic Auth 保护 HTTP 与 WebSocket，ttyd 仅监听回环地址并检查 Origin。用户名和随机密码写入服务器私有目录，不进入源码或 URL。页面最多一个连接，选择 auto、bypassPermissions 或 Plan 后启动非 root、只读根目录、无 Docker Socket 的隔离容器；只挂载测试工作区、该模式的 CLI 会话目录和只读 CLI 安装目录。
 
-浏览器不会运行本机 Claude Code。模型请求走 WebCC 公网地址，工具出网走指定代理。测试使用独立的 messages/models 密钥，安装后约 24 小时过期；服务同时设 24 小时运行上限，单次连接上限 30 分钟。该入口用于内部单用户测试，不提供多人工作区隔离。
+浏览器不会运行本机 C Code。模型请求走 WebCC 公网地址，工具出网走指定代理。测试使用独立的 messages/models 密钥，安装后约 24 小时过期；服务同时设 24 小时运行上限，单次连接上限 30 分钟。该入口用于内部单用户测试，不提供多人工作区隔离。
 
 `systemctl stop webcc-cli-test` 停止入口。撤销 `/var/lib/webcc-cluster/cli-playground/access.json` 中对应的调用密钥后，现有 CLI 也无法继续请求。重新开放须明确轮换测试凭据，不复用过期密钥。该目录含秘密和会话，禁止提交 Git。刷新会断开当前终端；同模式的历史保留供 CLI `/resume` 使用，正在执行的任务不保证因浏览器重连自动恢复。
 
 依据：[ttyd 官方仓库](https://github.com/tsl0922/ttyd)。
 
-### Claude Code 的语言风格
+### C Code 的语言风格
 
-测试页在 auto、bypassPermissions 和 Plan 中统一选用 `English progress` 输出风格：过程说明和工具简述使用英文，最终回答跟随用户语言；明确的语言要求优先。代码、文件名、引用、工具结果和错误消息保持原文。风格文件位于 `deploy/cli-test/english-progress.md`，设置 `keep-coding-instructions: true`，保留 Claude Code 的编程指令，不增加固定话术或逐步播报要求。
+测试页在 auto、bypassPermissions 和 Plan 中统一选用 `English progress` 输出风格：过程说明和工具简述使用英文，最终回答跟随用户语言；明确的语言要求优先。代码、文件名、引用、工具结果和错误消息保持原文。风格文件位于 `deploy/cli-test/english-progress.md`，设置 `keep-coding-instructions: true`，保留 C Code 的编程指令，不增加固定话术或逐步播报要求。
 
-这是客户端设置，不是网关翻译，也不会改变 Chatbox 或其他 API 客户端的语言。外部 Claude Code 如需相同风格，将文件放入其配置目录的 `output-styles/`，在 settings.json 中设置 `"outputStyle": "English progress"`，重新启动会话。原生界面标签由 CLI 自己渲染；子代理使用各自的指令。模型遵循风格的程度仍需验收，不能保证每次输出语言完全一致。
+这是客户端设置，不是网关翻译，也不会改变 Chatbox 或其他 API 客户端的语言。外部 C Code 如需相同风格，将文件放入其配置目录的 `output-styles/`，在 settings.json 中设置 `"outputStyle": "English progress"`，重新启动会话。原生界面标签由 CLI 自己渲染；子代理使用各自的指令。模型遵循风格的程度仍需验收，不能保证每次输出语言完全一致。
 
-依据：[Claude Code 输出风格说明](https://code.claude.com/docs/en/output-styles)。
+依据：[C Code 输出风格说明](https://code.claude.com/docs/en/output-styles)。
 
-### Claude Code 的 API 重试
+### C Code 的 API 重试
 
 测试页显式设置 `CLAUDE_CODE_MAX_RETRIES=10`，使用 CLI 原生重试、退避和倒计时，不在 WebCC 生成重试提示文字。该值也是官方默认值；外部 CLI 如未覆盖它，无须额外配置。需要固定该值时，在客户端现有 settings.json 的 env 中加入 `"CLAUDE_CODE_MAX_RETRIES": "10"`，重新启动会话即可。
 

@@ -1,6 +1,6 @@
 # 原生协议与平台适配
 
-目标是在 WebCC 提供可实际使用的 Claude API 能力。ClewdR 保持原版，仅使用现有网页账号。不通过删除参数、生成虚假字段或提前拒绝请求来宣称功能完成。
+目标是在 WebCC 提供可实际使用的 C API 能力。ClewdR 保持原版，仅使用现有网页账号。不通过删除参数、生成虚假字段或提前拒绝请求来宣称功能完成。
 
 ## 请求与返回
 
@@ -8,7 +8,7 @@
 
 网页专用 message_limit 是额度通知，不作为 Messages 内容事件发送；实际 error 事件与未知未来事件保留，不修改正文或工具结果。
 
-Claude Code 的原生服务端安全判定（safeguards / safeguard_results）未实现，不能因普通工具及独立分类器通过就宣称支持。使用网页通道时，客户端按官方说明设置 CLAUDE_CODE_AUTO_MODE_SERVER=0，继续执行客户端 auto 审批；不得伪造服务端判定。[配置与边界](OPERATIONS.md#claude-code-的-auto-与-bypasspermissions)。
+C Code 的原生服务端安全判定（safeguards / safeguard_results）未实现，不能因普通工具及独立分类器通过就宣称支持。使用网页通道时，客户端按官方说明设置 CLAUDE_CODE_AUTO_MODE_SERVER=0，继续执行客户端 auto 审批；不得伪造服务端判定。[配置与边界](OPERATIONS.md#c-code-的-auto-与-bypasspermissions)。
 
 ## 实现顺序
 

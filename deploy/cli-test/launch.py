@@ -9,7 +9,7 @@ import uuid
 
 ROOT = Path('/var/lib/webcc-cluster/cli-playground')
 config = json.loads((ROOT / 'access.json').read_text())
-print('\n服务器 Claude Code 测试台\n1. auto\n2. bypass（仅限隔离测试容器）\n3. Plan\n', flush=True)
+print('\n服务器 C Code 测试台\n1. auto\n2. bypass（仅限隔离测试容器）\n3. Plan\n', flush=True)
 try:
     choice = input('请选择 [1]: ').strip() or '1'
 except EOFError:
